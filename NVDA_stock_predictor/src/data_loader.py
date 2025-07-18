@@ -1,5 +1,6 @@
 import yfinance as yf
 import pandas as pd
+from pathlib import Path
 from config import TICKER, START_DATE, END_DATE, RAW_DATA_PATH
 
 def load_data():
@@ -8,6 +9,7 @@ def load_data():
     if df.empty:
         raise ValueError(f"No data found for {TICKER} in the specified date range.")
 
+    Path(RAW_DATA_PATH).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(RAW_DATA_PATH, index=True)
     print(f"Data saved to {RAW_DATA_PATH}")
     return df
