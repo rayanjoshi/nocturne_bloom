@@ -1,9 +1,9 @@
 data_loader:
-  raw_data_path: nocturne_bloom/NVDA_stock_predictor/data/raw/nvda_raw_data.csv
+  raw_data_path: data/raw/nvda_raw_data.csv
 
 features:
   include_past_days: 30
-  processed_data_path: nocturne_bloom/NVDA_stock_predictor/data/processed/nvda_processed_data.csv
-  SCALER_PATH: nocturne_bloom/NVDA_stock_predictor/models/scaler.pkl
+  processed_data_path: data/processed/nvda_processed_data.csv
+  SCALER_PATH: models/scaler.pkl
   normalize: true
   scaler_type: minmax  # could be 'standard' or 'robust' too
