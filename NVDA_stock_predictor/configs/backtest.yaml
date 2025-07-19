@@ -1,0 +1,4 @@
+backtest:
+  lookback_window: 30
+  initial_cash: 10000
+  strategy: "baseline"
