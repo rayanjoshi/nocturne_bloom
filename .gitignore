@@ -6,3 +6,6 @@ __pycache__/
 NVDA_stock_predictor/data/preprocessing/
 NVDA_stock_predictor/data/raw/
 NVDA_stock_predictor/data/sequence_processing/
+NVDA_stock_predictor/models/scaler.pkl
+NVDA_stock_predictor/src/outputs/
+NVDA_stock_predictor/data/outputs/
