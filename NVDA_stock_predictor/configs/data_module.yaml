@@ -1,0 +1,6 @@
+feature_engineering:
+  processed_data_path: data/processed/nvda_processed_data.csv
+
+data_module:
+  window_size: 10
+  target_col: Close
