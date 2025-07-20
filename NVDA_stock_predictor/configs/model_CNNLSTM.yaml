@@ -1,0 +1,15 @@
+CNNEncoder:
+  input_channels: 1
+  CNN_channels: [32, 64]
+  kernel_size: [2,3]
+  padding: [f{kernel_size[0] // 2}, f{kernel_size[1] // 2}]
+  stride: 2
+
+LSTMPredictor:
+  input_size: 64  # Output size of CNNEncoder
+  hidden_size: 64
+  num_layers:  1
+  dropout: 0.2
+  bidirectional: false
+  output_size: 1
+  batch_first: true
