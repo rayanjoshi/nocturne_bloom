@@ -57,17 +57,17 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
     
     scaler_path = repo_root / cfg.features.SCALER_PATH.lstrip('../')
-    processed_data_path = repo_root / cfg.features.processed_data_path.lstrip('../')
-    
+    preprocessing_data_path = repo_root / cfg.features.preprocessing_data_path.lstrip('../')
+
     # Save the scaler for future use
     scaler_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(scaler, scaler_path)
 
     # Save processed data
-    processed_data_path.parent.mkdir(parents=True, exist_ok=True)
-    dataFrame.to_csv(processed_data_path, index=True)
+    preprocessing_data_path.parent.mkdir(parents=True, exist_ok=True)
+    dataFrame.to_csv(preprocessing_data_path, index=True)
 
-    print(f"Processed data saved to {processed_data_path.absolute()}")
+    print(f"Processed data saved to {preprocessing_data_path.absolute()}")
     print("--------- Feature Engineering Statistics ---------")
     print(f"Total features created: {len(dataFrame.columns)}")
     print(f"Features scaled: {len(indicator_cols)}")

@@ -18,7 +18,18 @@ def data_module(dataFrame, cfg: DictConfig):
         x.append(features.iloc[i-window_size:i].values)  # past window_size days features
         y.append(target.iloc[i])                         # target is the value at day i
 
-    return np.array(x), np.array(y)
+    x = np.array(x)
+    y = np.array(y)
+    
+    script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
+    repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
+
+    x_save_path = repo_root / cfg.data_module.x_save_path.lstrip('../')
+    y_save_path = repo_root / cfg.data_module.y_save_path.lstrip('../')
+
+    np.save(x_save_path, x)
+    np.save(y_save_path, y)
+    return x, y
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="data_module")
@@ -27,10 +38,10 @@ def main(cfg: DictConfig):
         # Convert relative path to absolute path within the repository
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-        processed_data_path = repo_root / cfg.feature_engineering.processed_data_path.lstrip('../')
+        preprocessing_data_path = repo_root / cfg.feature_engineering.preprocessing_data_path.lstrip('../')
 
-        print(f"Reading processed data from: {processed_data_path.absolute()}")
-        dataFrame = pd.read_csv(processed_data_path, header=0, skiprows=[1,2], index_col=0, parse_dates=True)
+        print(f"Reading processed data from: {preprocessing_data_path.absolute()}")
+        dataFrame = pd.read_csv(preprocessing_data_path, header=0, index_col=0, parse_dates=True)
 
         x,y = data_module(dataFrame, cfg)
         print("--------- Data Module Statistics ---------")

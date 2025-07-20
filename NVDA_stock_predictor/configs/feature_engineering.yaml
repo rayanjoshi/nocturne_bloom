@@ -3,7 +3,7 @@ data_loader:
 
 features:
   include_past_days: 30
-  processed_data_path: data/processed/nvda_processed_data.csv
+  preprocessing_data_path: data/preprocessing/nvda_processed_data.csv
   SCALER_PATH: models/scaler.pkl
   normalize: true
   scaler_type: minmax

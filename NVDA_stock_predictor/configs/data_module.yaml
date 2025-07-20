@@ -1,6 +1,8 @@
 feature_engineering:
-  processed_data_path: data/processed/nvda_processed_data.csv
+  preprocessing_data_path: data/preprocessing/nvda_processed_data.csv
 
 data_module:
   window_size: 10
   target_col: Close
+  x_save_path: data/sequence_processing/nvda_processed_data.npy
+  y_save_path: data/sequence_processing/nvda_processed_target.npy
