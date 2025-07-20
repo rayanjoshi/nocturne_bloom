@@ -1,5 +1,9 @@
 # --------- Core ML and Deep Learning ---------- #
-pytorch-lightning>=2.0.0,<3.0.0
+lightning>=2.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+pytorch-lightning>=2.0.0
+lightning[pytorch-extras]
 scikit-learn>=1.4.0
 pandas>=2.1.0
 numpy>=1.26.0
