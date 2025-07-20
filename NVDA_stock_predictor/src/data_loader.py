@@ -20,7 +20,7 @@ def load_data(cfg: DictConfig):
     dataFrame.to_csv(output_path, index=True)
     
     print(f"Data saved to {output_path.absolute()}")
-    print("--------- Loaded Data ---------")
+    print("--------- Data Loading Statistics ---------")
     print(f"Total features created: {len(dataFrame.columns)}")
     print(f"Dataset shape: {dataFrame.shape}")
     print(f"All features: {list(dataFrame.columns)}")

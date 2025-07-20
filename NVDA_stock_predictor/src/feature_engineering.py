@@ -67,8 +67,8 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     processed_data_path.parent.mkdir(parents=True, exist_ok=True)
     dataFrame.to_csv(processed_data_path, index=True)
 
-    print(f"Feature engineering completed. Processed data saved to {processed_data_path.absolute()}")
-    print("--------- Generated Features ---------")
+    print(f"Processed data saved to {processed_data_path.absolute()}")
+    print("--------- Feature Engineering Statistics ---------")
     print(f"Total features created: {len(dataFrame.columns)}")
     print(f"Features scaled: {len(indicator_cols)}")
     print(f"Dataset shape: {dataFrame.shape}")
