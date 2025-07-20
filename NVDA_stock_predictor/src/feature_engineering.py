@@ -2,40 +2,55 @@ import pandas as pd
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
 from ta.volatility import BollingerBands
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 import joblib
 from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 
-def feature_engineering(df, cfg: DictConfig):
+def feature_engineering(dataFrame, cfg: DictConfig):
     print("Starting feature engineering...")
 
     for col in ['Close','Open', 'High', 'Low', 'Volume']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    df.dropna(inplace=True)
+        if col in dataFrame.columns:
+            dataFrame[col] = pd.to_numeric(dataFrame[col], errors='coerce')
+    dataFrame.dropna(inplace=True) # Ensure no NaN values before calculations
     # Calculate RSI
-    rsi = RSIIndicator(close=df['Close'], window=14)
-    df['RSI'] = rsi.rsi()
+    rsi = RSIIndicator(close=dataFrame['Close'], window=14)
+    dataFrame['RSI'] = rsi.rsi()
 
     # Calculate MACD
-    macd = MACD(close=df['Close'])
-    df['MACD'] = macd.macd()
-    df['MACD_Signal'] = macd.macd_signal()
+    macd = MACD(close=dataFrame['Close'])
+    dataFrame['MACD'] = macd.macd()
+    dataFrame['MACD_Signal'] = macd.macd_signal()
 
     # Calculate Bollinger Bands
-    bb = BollingerBands(close=df['Close'], window=20, window_dev=2)
-    df['BB_High'] = bb.bollinger_hband()
-    df['BB_Low'] = bb.bollinger_lband()
+    bb = BollingerBands(close=dataFrame['Close'], window=20, window_dev=2)
+    dataFrame['BB_High'] = bb.bollinger_hband()
+    dataFrame['BB_Low'] = bb.bollinger_lband()
+
+    # Calculate SMA (Simple Moving Average)
+    dataFrame['SMA_20'] = dataFrame['Close'].rolling(window=20).mean()
+
+    # Calculate EMA (Exponential Moving Average)
+    dataFrame['EMA_12'] = dataFrame['Close'].ewm(span=12, adjust=False).mean()
+
+    # Calculate price change and the percentage change of neighbouring closing price
+    dataFrame['Close_Change'] = dataFrame['Close'].diff()
+    dataFrame['Close_Change_Percentage'] = dataFrame['Close'].pct_change()
 
     # Drop rows with NaN values
-    df.dropna(inplace=True)
+    dataFrame.dropna(inplace=True)
 
     # Scale features
-    scaler = StandardScaler()
-    indicator_cols = ['RSI', 'MACD', 'MACD_Signal', 'BB_High', 'BB_Low']
-    df[indicator_cols] = scaler.fit_transform(df[indicator_cols])
+    scaler = MinMaxScaler()
+    # Include all relevant columns for scaling
+    indicator_cols = cfg.features.indicator_cols
+    
+    # Scale the features and assign them back individually
+    scaled_data = scaler.fit_transform(dataFrame[indicator_cols])
+    for i, col in enumerate(indicator_cols):
+        dataFrame[col] = scaled_data[:, i]
     
     # Convert relative paths to absolute paths within the repository
     script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
@@ -50,11 +65,18 @@ def feature_engineering(df, cfg: DictConfig):
 
     # Save processed data
     processed_data_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(processed_data_path, index=True)
+    dataFrame.to_csv(processed_data_path, index=True)
 
     print(f"Feature engineering completed. Processed data saved to {processed_data_path.absolute()}")
+    print("--------- Generated Features ---------")
+    print(f"Total features created: {len(dataFrame.columns)}")
+    print(f"Features scaled: {len(indicator_cols)}")
+    print(f"Dataset shape: {dataFrame.shape}")
+    print(f"Scaled features: {indicator_cols}")
+    print(f"All features: {list(dataFrame.columns)}")
+    print("--------- Feature Engineering Completed ---------")
 
-    return df
+    return dataFrame
 
 @hydra.main(version_base=None, config_path="../configs", config_name="feature_engineering")
 def main(cfg: DictConfig):
@@ -65,9 +87,8 @@ def main(cfg: DictConfig):
         raw_data_path = repo_root / cfg.data_loader.raw_data_path.lstrip('../')
         
         print(f"Reading raw data from: {raw_data_path.absolute()}")
-        df = pd.read_csv(raw_data_path, header=0, skiprows=[1,2], index_col=0, parse_dates=True)
-        feature_engineering(df, cfg)
-        print("Feature engineering completed successfully.")
+        dataFrame = pd.read_csv(raw_data_path, header=0, skiprows=[1,2], index_col=0, parse_dates=True)
+        feature_engineering(dataFrame, cfg)
     except Exception as e:
         print(f"An error occurred: {e}")
         raise

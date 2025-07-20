@@ -6,4 +6,14 @@ features:
   processed_data_path: data/processed/nvda_processed_data.csv
   SCALER_PATH: models/scaler.pkl
   normalize: true
-  scaler_type: minmax  # could be 'standard' or 'robust' too
+  scaler_type: minmax
+  indicator_cols: 
+    - RSI
+    - MACD
+    - MACD_Signal
+    - BB_High
+    - BB_Low
+    - SMA_20
+    - EMA_12
+    - Close_Change
+    - Close_Change_Percentage
