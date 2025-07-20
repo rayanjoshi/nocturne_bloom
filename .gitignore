@@ -1,7 +1,29 @@
 # .gitignore
 
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# System files
 .DS_Store
+
+# Data files
 data/*.csv
+**/data/
+NVDA_stock_predictor/data/
+
+# Model files
+../models/scaler.pkl
+**/models/*.pkl
+**/models/*.h5
+NVDA_stock_predictor/models/
+
+# Hydra outputs
+outputs/
+**/outputs/
+logs/
+**/logs/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
