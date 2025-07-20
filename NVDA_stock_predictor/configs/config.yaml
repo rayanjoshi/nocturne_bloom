@@ -1,5 +1,5 @@
 defaults:
   - data_loader: data_loader
   - feature_engineering: feature_engineering
-  - train: train
+  - trainer: trainer
   - backtest: backtest
