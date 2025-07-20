@@ -11,8 +11,6 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 
-cfg = OmegaConf.load("configs/model_CNNLSTM.yaml")
-
 class CNNFeatureExtractor(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
@@ -41,7 +39,7 @@ class LSTMPredictor(nn.Module):
         dropout = cfg.LSTM.dropout
         output_size = cfg.LSTM.output_size
         batch_first = cfg.LSTM.batch_first
-
+        
         self.lstm = nn.LSTM (
             input_size, 
             hidden_size, 
@@ -66,3 +64,24 @@ class CNNLSTMModel(nn.Module):
         lstm_in = cnn_out.permute(0, 2, 1) 
         output = self.lstm(lstm_in)         
         return output
+
+class CNNLSTMModule(L.LightningModule):
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.model = CNNLSTMModel(cfg.model_CNNLSTM)
+        self.criterion = nn.MSELoss()
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x).squeeze(-1)  # Remove the last dimension if needed
+        loss = self.criterion(y_hat, y)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.cfg.optimizer.lr)
+        return optimizer
