@@ -10,10 +10,21 @@ features:
   indicator_cols: 
     - RSI
     - MACD
-    - MACD_Signal
-    - BB_High
-    - BB_Low
+    - MACDSignal
+    - BBHigh
+    - BBLow
     - SMA_20
     - EMA_12
-    - Close_Change
-    - Close_Change_Percentage
+    - EMA_26
+    - priceChange
+    - closeChangePercentage
+    - rateOfChange
+    - Momentum
+    - averageTrueRange
+    - rollingStd
+    - volumeChange
+    - volumeRateOfChange
+    - onBalanceVolume
+    - Body
+    - upperWick
+    - lowerWick

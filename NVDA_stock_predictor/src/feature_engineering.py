@@ -14,31 +14,54 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     for col in ['Close','Open', 'High', 'Low', 'Volume']:
         if col in dataFrame.columns:
             dataFrame[col] = pd.to_numeric(dataFrame[col], errors='coerce')
+
     dataFrame.dropna(inplace=True) # Ensure no NaN values before calculations
-    # Calculate RSI
+    # -------- Momentum/ Trend indicators -------- #
     rsi = RSIIndicator(close=dataFrame['Close'], window=14)
     dataFrame['RSI'] = rsi.rsi()
-
-    # Calculate MACD
     macd = MACD(close=dataFrame['Close'])
     dataFrame['MACD'] = macd.macd()
-    dataFrame['MACD_Signal'] = macd.macd_signal()
-
-    # Calculate Bollinger Bands
-    bb = BollingerBands(close=dataFrame['Close'], window=20, window_dev=2)
-    dataFrame['BB_High'] = bb.bollinger_hband()
-    dataFrame['BB_Low'] = bb.bollinger_lband()
-
-    # Calculate SMA (Simple Moving Average)
+    dataFrame['MACDSignal'] = macd.macd_signal()
+    
     dataFrame['SMA_20'] = dataFrame['Close'].rolling(window=20).mean()
-
-    # Calculate EMA (Exponential Moving Average)
     dataFrame['EMA_12'] = dataFrame['Close'].ewm(span=12, adjust=False).mean()
+    dataFrame['EMA_26'] = dataFrame['Close'].ewm(span=26, adjust=False).mean()
+    # First 11 values will be NaN, so we can calculate ROC from the 12th value onwards
+    dataFrame['rateOfChange'] = (dataFrame['Close'] - dataFrame['Close'].shift(12)) / dataFrame['Close'].shift(12) * 100
+    dataFrame['Momentum'] = dataFrame['Close'].diff(10)
 
-    # Calculate price change and the percentage change of neighbouring closing price
-    dataFrame['Close_Change'] = dataFrame['Close'].diff()
-    dataFrame['Close_Change_Percentage'] = dataFrame['Close'].pct_change()
+    # --------- Volatility indicators --------- #
+    bb = BollingerBands(close=dataFrame['Close'], window=20, window_dev=2)
+    dataFrame['BBHigh'] = bb.bollinger_hband()
+    dataFrame['BBLow'] = bb.bollinger_lband()
+    
+    dataFrame['priceChange'] = dataFrame['Close'].diff()
+    dataFrame['closeChangePercentage'] = dataFrame['Close'].pct_change()
+    
+    range = dataFrame['High'] - dataFrame['Low']
+    previousClosingHigh = (dataFrame['High'] - dataFrame['Close'].shift(1)).abs()
+    previousClosingLow = (dataFrame['Low'] - dataFrame['Close'].shift(1)).abs()
+    true_range = pd.concat([range, previousClosingHigh, previousClosingLow], axis=1).max(axis=1)
+    dataFrame['averageTrueRange'] = true_range.rolling(window=14).mean()
+    dataFrame['rollingStd'] = dataFrame['Close'].rolling(window=14).std()
 
+    # --------- Volume indicators --------- #
+    dataFrame['volumeChange'] = dataFrame['Volume'].diff()
+    dataFrame['volumeRateOfChange'] = (dataFrame['Volume'] - dataFrame['Volume'].shift(12)) / dataFrame['Volume'].shift(12) * 100
+    
+    priceChange = dataFrame['Close'].diff()
+    volume_direction = pd.Series(index=dataFrame.index, dtype=float)
+    volume_direction[priceChange > 0] = dataFrame['Volume'][priceChange > 0]
+    volume_direction[priceChange < 0] = -dataFrame['Volume'][priceChange < 0]
+    volume_direction[priceChange == 0] = 0
+    volume_direction.iloc[0] = 0  # First value is 0
+    dataFrame['onBalanceVolume'] = volume_direction.cumsum()
+
+    # -------- Candle indicators --------- #
+    dataFrame['Body'] = dataFrame['Close'] - dataFrame['Open']
+    dataFrame['upperWick'] = dataFrame['High'] - dataFrame[['Close', 'Open']].max(axis=1)
+    dataFrame['lowerWick'] = dataFrame[['Close', 'Open']].min(axis=1) - dataFrame['Low']
+    
     # Drop rows with NaN values
     dataFrame.dropna(inplace=True)
 
