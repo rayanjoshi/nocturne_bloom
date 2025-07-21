@@ -1,4 +1,4 @@
-import yfinance as yf
+import wrds
 import pandas as pd
 from pathlib import Path
 import hydra
@@ -6,10 +6,74 @@ from omegaconf import DictConfig
 
 def load_data(cfg: DictConfig):
     print(f"Loading data for {cfg.data_loader.TICKER} from {cfg.data_loader.START_DATE} to {cfg.data_loader.END_DATE}")
-    dataFrame = yf.download(cfg.data_loader.TICKER, start=cfg.data_loader.START_DATE, end=cfg.data_loader.END_DATE)
-    
+    db = wrds.Connection(wrds_username='rj524')
+
+    # print(db.list_libraries())  # prints accessible data sets
+
+    sql_query = f"""
+    WITH stock_data AS (
+        SELECT 
+            date,
+            permno,
+            ABS(prc) / cfacpr as close,
+            CASE WHEN openprc IS NOT NULL THEN ABS(openprc) / cfacpr ELSE ABS(prc) / cfacpr END as open,
+            CASE WHEN askhi IS NOT NULL THEN askhi / cfacpr ELSE ABS(prc) / cfacpr END as high,
+            CASE WHEN bidlo IS NOT NULL THEN bidlo / cfacpr ELSE ABS(prc) / cfacpr END as low,
+            vol * cfacshr as volume
+        FROM crsp.dsf
+        WHERE permno = {cfg.data_loader.PERMNO}
+        AND date >= '{cfg.data_loader.START_DATE}' AND date <= '{cfg.data_loader.END_DATE}'
+        AND prc IS NOT NULL
+    ),
+    fundamental_data AS (
+        SELECT 
+            l.lpermno as permno,
+            f.datadate,
+            CASE WHEN f.ceqq > 0 THEN (f.prccq * f.cshoq) / f.ceqq ELSE NULL END as pb_ratio,
+            CASE WHEN f.niq > 0 THEN (f.prccq * f.cshoq) / (f.niq * 4) ELSE NULL END as pe_ratio
+        FROM comp.fundq f
+        JOIN crsp_q_ccm.ccm_lookup l ON f.gvkey = l.gvkey
+        WHERE l.lpermno = {cfg.data_loader.PERMNO}
+        AND f.datadate >= '{cfg.data_loader.START_DATE}' AND f.datadate <= '{cfg.data_loader.END_DATE}'
+        AND f.prccq IS NOT NULL AND f.cshoq IS NOT NULL
+    )
+    SELECT 
+        s.date,
+        s.permno,
+        s.high,
+        s.low, 
+        s.open,
+        s.close,
+        s.volume,
+        f.pb_ratio,
+        f.pe_ratio
+    FROM stock_data s
+    LEFT JOIN fundamental_data f ON s.permno = f.permno 
+        AND f.datadate = (
+            SELECT MAX(f2.datadate) 
+            FROM fundamental_data f2 
+            WHERE f2.permno = s.permno 
+            AND f2.datadate <= s.date
+        )
+    ORDER BY s.date;
+    """
+    dataFrame = db.raw_sql(sql_query)
     if dataFrame.empty:
         raise ValueError(f"No data found for {cfg.data_loader.TICKER} in the specified date range.")
+
+    # Process the data
+    dataFrame['date'] = pd.to_datetime(dataFrame['date'])
+    dataFrame.set_index('date', inplace=True)
+    
+    # Forward fill PB and PE ratios since they are quarterly data
+    dataFrame['pb_ratio'] = dataFrame['pb_ratio'].ffill()
+    dataFrame['pe_ratio'] = dataFrame['pe_ratio'].ffill()
+    
+    # Rename columns to match expected format
+    dataFrame.columns = ['permno', 'High', 'Low', 'Open', 'Close', 'Volume', 'PB_Ratio', 'PE_Ratio']
+    
+    # Drop permno column as it's not needed for modeling
+    dataFrame = dataFrame.drop('permno', axis=1)
 
     # Convert relative path to absolute path within the repository
     script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
