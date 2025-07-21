@@ -2,7 +2,7 @@ data_loader:
   TICKER: "NVDA"
   PERMNO: 86580
   GVKEY: 117768
-  START_DATE: "2005-01-01"
+  START_DATE: "2004-10-31"
   END_DATE: "2022-12-31"
   raw_data_path: data/raw/nvda_raw_data.csv  # Path relative to NVDA_stock_predictor folder
   validation_split: 0.2
