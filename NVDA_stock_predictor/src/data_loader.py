@@ -29,13 +29,13 @@ def load_data(cfg: DictConfig):
         SELECT 
             l.lpermno as permno,
             f.datadate,
-            CASE WHEN f.ceqq > 0 THEN (f.prccq * f.cshoq) / f.ceqq ELSE NULL END as pb_ratio,
-            CASE WHEN f.niq > 0 THEN (f.prccq * f.cshoq) / (f.niq * 4) ELSE NULL END as pe_ratio
+            CASE WHEN f.ceqq > 0 AND f.cshoq > 0 THEN f.ceqq / f.cshoq ELSE NULL END as book_value_per_share,
+            CASE WHEN f.niq IS NOT NULL AND f.cshoq > 0 THEN (f.niq * 4) / f.cshoq ELSE NULL END as earnings_per_share
         FROM comp.fundq f
         JOIN crsp_q_ccm.ccm_lookup l ON f.gvkey = l.gvkey
         WHERE l.lpermno = {cfg.data_loader.PERMNO}
         AND f.datadate >= '{cfg.data_loader.START_DATE}' AND f.datadate <= '{cfg.data_loader.END_DATE}'
-        AND f.prccq IS NOT NULL AND f.cshoq IS NOT NULL
+        AND f.cshoq IS NOT NULL
     )
     SELECT 
         s.date,
@@ -45,8 +45,8 @@ def load_data(cfg: DictConfig):
         s.open,
         s.close,
         s.volume,
-        f.pb_ratio,
-        f.pe_ratio
+        f.book_value_per_share,
+        f.earnings_per_share
     FROM stock_data s
     LEFT JOIN fundamental_data f ON s.permno = f.permno 
         AND f.datadate = (
@@ -65,12 +65,13 @@ def load_data(cfg: DictConfig):
     dataFrame['date'] = pd.to_datetime(dataFrame['date'])
     dataFrame.set_index('date', inplace=True)
     
-    # Forward fill PB and PE ratios since they are quarterly data
-    dataFrame['pb_ratio'] = dataFrame['pb_ratio'].ffill()
-    dataFrame['pe_ratio'] = dataFrame['pe_ratio'].ffill()
+    # Forward fill fundamental components since they are quarterly data
+    dataFrame['book_value_per_share'] = dataFrame['book_value_per_share'].ffill()
+    dataFrame['earnings_per_share'] = dataFrame['earnings_per_share'].ffill()
     
     # Rename columns to match expected format
-    dataFrame.columns = ['permno', 'High', 'Low', 'Open', 'Close', 'Volume', 'PB_Ratio', 'PE_Ratio']
+    dataFrame.columns = ['permno', 'High', 'Low', 'Open', 'Close', 'Volume', 
+                        'Book_Value_Per_Share', 'Earnings_Per_Share']
     
     # Drop permno column as it's not needed for modeling
     dataFrame = dataFrame.drop('permno', axis=1)
