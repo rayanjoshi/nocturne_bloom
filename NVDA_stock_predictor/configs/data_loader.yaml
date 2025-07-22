@@ -4,6 +4,7 @@ data_loader:
   GVKEY: 117768
   START_DATE: "2004-10-31"
   END_DATE: "2022-12-31"
+  sql_save_path: /WRDS_query.sql
   raw_data_path: data/raw/nvda_raw_data.csv  # Path relative to NVDA_stock_predictor folder
   validation_split: 0.2
   shuffle: true

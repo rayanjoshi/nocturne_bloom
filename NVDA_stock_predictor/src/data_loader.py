@@ -10,53 +10,18 @@ def load_data(cfg: DictConfig):
 
     # print(db.list_libraries())  # prints accessible data sets
 
-    sql_query = f"""
-    WITH stock_data AS (
-        SELECT 
-            date,
-            permno,
-            ABS(prc) / cfacpr as close,
-            CASE WHEN openprc IS NOT NULL THEN ABS(openprc) / cfacpr ELSE ABS(prc) / cfacpr END as open,
-            CASE WHEN askhi IS NOT NULL THEN askhi / cfacpr ELSE ABS(prc) / cfacpr END as high,
-            CASE WHEN bidlo IS NOT NULL THEN bidlo / cfacpr ELSE ABS(prc) / cfacpr END as low,
-            vol * cfacshr as volume
-        FROM crsp.dsf
-        WHERE permno = {cfg.data_loader.PERMNO}
-        AND date >= '{cfg.data_loader.START_DATE}' AND date <= '{cfg.data_loader.END_DATE}'
-        AND prc IS NOT NULL
-    ),
-    fundamental_data AS (
-        SELECT 
-            l.lpermno as permno,
-            f.datadate,
-            CASE WHEN f.ceqq > 0 AND f.cshoq > 0 THEN f.ceqq / f.cshoq ELSE NULL END as book_value_per_share,
-            CASE WHEN f.niq IS NOT NULL AND f.cshoq > 0 THEN (f.niq * 4) / f.cshoq ELSE NULL END as earnings_per_share
-        FROM comp.fundq f
-        JOIN crsp_q_ccm.ccm_lookup l ON f.gvkey = l.gvkey
-        WHERE l.lpermno = {cfg.data_loader.PERMNO}
-        AND f.datadate >= '{cfg.data_loader.START_DATE}' AND f.datadate <= '{cfg.data_loader.END_DATE}'
-        AND f.cshoq IS NOT NULL
+    sql_path = Path(__file__).parent / cfg.data_loader.sql_save_path.lstrip('../')
+    with open(sql_path, 'r') as file:
+        WRDS_query = file.read()
+        
+    sql_query = WRDS_query.format(
+        TICKER=cfg.data_loader.TICKER,
+        PERMNO=cfg.data_loader.PERMNO,
+        GVKEY=cfg.data_loader.GVKEY,
+        START_DATE=cfg.data_loader.START_DATE,
+        END_DATE=cfg.data_loader.END_DATE
     )
-    SELECT 
-        s.date,
-        s.permno,
-        s.high,
-        s.low, 
-        s.open,
-        s.close,
-        s.volume,
-        f.book_value_per_share,
-        f.earnings_per_share
-    FROM stock_data s
-    LEFT JOIN fundamental_data f ON s.permno = f.permno 
-        AND f.datadate = (
-            SELECT MAX(f2.datadate) 
-            FROM fundamental_data f2 
-            WHERE f2.permno = s.permno 
-            AND f2.datadate <= s.date
-        )
-    ORDER BY s.date;
-    """
+
     dataFrame = db.raw_sql(sql_query)
     if dataFrame.empty:
         raise ValueError(f"No data found for {cfg.data_loader.TICKER} in the specified date range.")
