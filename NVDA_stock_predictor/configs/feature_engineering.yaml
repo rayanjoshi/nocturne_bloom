@@ -4,22 +4,25 @@ data_loader:
 features:
   include_past_days: 30
   preprocessing_data_path: data/preprocessing/nvda_processed_data.csv
-  SCALER_PATH: models/scaler.pkl
+  TEMPORAL_SCALER_PATH: models/temporalScaler.pkl
+  STATIC_SCALER_PATH: models/staticScaler.pkl
   normalize: true
   scaler_type: minmax
-  indicator_cols: 
+  temporal_indicator_cols: 
     - RSI
     - MACD
     - MACDSignal
     - BBHigh
     - BBLow
     - SMA_20
+    - SMA_50
+    - SMA_200
     - EMA_12
     - EMA_26
     - priceChange
     - closeChangePercentage
     - rateOfChange
-    - Momentum
+    - momentum
     - averageTrueRange
     - rollingStd
     - volumeChange
@@ -28,3 +31,19 @@ features:
     - Body
     - upperWick
     - lowerWick
+    - commodityChannelIndex
+    - averageDirectionalIndex
+    - aroonUp
+    - aroonDown
+
+  static_indicator_cols:
+    - priceToEarnings
+    - priceToBook
+    - beta
+    - sigma
+    - skewness
+    - chaikinMoneyFlow
+    - forceIndex
+    - negativeVolumeIndex
+    - massIndex
+    - ulcerIndex
