@@ -36,7 +36,7 @@ def load_data(cfg: DictConfig):
     
     # Rename columns to match expected format
     dataFrame.columns = ['permno', 'High', 'Low', 'Open', 'Close', 'Volume', 
-                        'Book_Value_Per_Share', 'Earnings_Per_Share']
+                        'PB_Ratio', 'PE_Ratio']
     
     # Drop permno column as it's not needed for modeling
     dataFrame = dataFrame.drop('permno', axis=1)
