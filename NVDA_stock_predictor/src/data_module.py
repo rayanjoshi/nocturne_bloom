@@ -1,11 +1,13 @@
 import hydra
 import torch
+import joblib
 import lightning as L
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 from omegaconf import DictConfig
+from sklearn.preprocessing import MinMaxScaler
 
 class SimpleTensorDataset(Dataset):
     """Simple dataset for tensor data used in Lightning dataloaders"""
@@ -40,9 +42,19 @@ class StockDataset(Dataset):
         x = np.array(x)
         y = np.array(y)
         
+        target_scaler = MinMaxScaler()
+        y_scaled = target_scaler.fit_transform(y.reshape(-1, 1)).flatten()
+        
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-
+        
+        y_scaled_save_path = repo_root / cfg.data_module.y_scaled_save_path.lstrip('../')
+        y_scaled_save_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(target_scaler, y_scaled_save_path)
+        print(f"Target scaler saved to: {y_scaled_save_path.absolute()}")
+        
+        y = y_scaled  # Use scaled target for training
+        
         # Save numpy arrays to sequence_processing directory 
         x_save_path = repo_root / cfg.data_processor.x_load_path.lstrip('../')
         y_save_path = repo_root / cfg.data_processor.y_load_path.lstrip('../')

@@ -3,6 +3,7 @@ data_module:
   target_col: Close
   x_save_path: data/processed/nvda_processed_x.pt
   y_save_path: data/processed/nvda_processed_y.pt
+  y_scaled_save_path: models/target_scaler.pkl
   batch_size: 64
   num_workers: 7
   train_val_split: 0.8
