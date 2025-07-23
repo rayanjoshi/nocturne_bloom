@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torchmetrics import MeanAbsoluteError, MeanSquaredError
+from torchmetrics.regression import R2Score
 from torchvision import transforms
 import lightning as L
 from omegaconf import DictConfig
@@ -74,22 +76,48 @@ class CNNLSTMModule(L.LightningModule):
         # Pass the entire config since CNNLSTMModel expects CNNEncoder and LSTMPredictor sections
         self.model = CNNLSTMModel(cfg)
         self.criterion = nn.MSELoss()
-
+        self.mae = MeanAbsoluteError()
+        self.rmse = MeanSquaredError()
+        self.r2 = R2Score()
+    
     def forward(self, x):
         return self.model(x)
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x).squeeze(-1)
-        
         loss = self.criterion(y_hat, y)
-        mae = torch.mean(torch.abs(y_hat - y))
-        rmse = torch.sqrt(torch.mean((y_hat - y) ** 2))
-
-        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log('val_mae', mae, on_step=True, on_epoch=True, prog_bar=True)
-        self.log('val_rmse', rmse, on_step=True, on_epoch=True, prog_bar=True)
+        
+        self.mae.update(y_hat, y)
+        self.rmse.update(y_hat, y)
+        self.r2.update(y_hat, y)
+        
+        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+        
         return loss
+    
+    def on_validation_epoch_end(self):
+        avg_loss = self.trainer.callback_metrics.get('val_loss', 0.0)
+        avg_mae = self.mae.compute()
+        avg_rmse = torch.sqrt(self.rmse.compute())
+        avg_r2 = self.r2.compute()
+        
+        self.log('val_mae', avg_mae, prog_bar=True)
+        self.log('val_rmse', avg_rmse, prog_bar=True)
+        self.log('val_r2', avg_r2, prog_bar=True)
+        print(f"\n \n")
+        print(f"\n --------- Validation Results ---------")
+        print(f"Loss: {avg_loss:.4f}")
+        print(f"MAE: {avg_mae:.4f}")
+        print(f"RMSE: {avg_rmse:.4f}")
+        print(f"R2: {avg_r2:.4f}")
+        print(f"--------- Validation Complete ---------\n")
+
+        # Reset metrics for next epoch
+        self.mae.reset()
+        self.rmse.reset()
+        self.r2.reset()
+
 
     def training_step(self, batch, batch_idx):
         x, y = batch
