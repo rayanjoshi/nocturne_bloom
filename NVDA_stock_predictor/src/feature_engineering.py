@@ -96,7 +96,7 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     temporalScaler = MinMaxScaler()
     staticScaler = StandardScaler()
     # Include all relevant columns for scaling
-    temporalIndicatorCols = cfg.features.temporal_indicator_cols
+    temporalIndicatorCols = cfg.features.temporal_indicator_cols + ['Open', 'High', 'Low', 'Close', 'Volume']
     staticIndicatorCols = cfg.features.static_indicator_cols
 
     # Scale the features and assign them back individually
