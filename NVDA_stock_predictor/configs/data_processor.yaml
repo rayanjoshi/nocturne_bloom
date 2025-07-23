@@ -1,0 +1,6 @@
+data_processor:
+  x_load_path: ../data/sequence_processing/nvda_processed_data.npy
+  y_load_path: ../data/sequence_processing/nvda_processed_target.npy
+
+  x_save_path: ../data/processed/nvda_processed_x.pt
+  y_save_path: ../data/processed/nvda_processed_y.pt
