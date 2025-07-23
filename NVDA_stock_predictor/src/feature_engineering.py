@@ -136,7 +136,7 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     print(f"All features: {list(dataFrame.columns)}")
     print("--------- Feature Engineering Completed ---------")
 
-    return dataFrame, scaledStaticData, scaledTemporalData
+    return dataFrame
 
 @hydra.main(version_base=None, config_path="../configs", config_name="feature_engineering")
 def main(cfg: DictConfig):
