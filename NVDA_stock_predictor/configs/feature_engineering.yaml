@@ -37,8 +37,8 @@ features:
     - aroonDown
 
   static_indicator_cols:
-    - priceToEarnings
-    - priceToBook
+    - PE_Ratio
+    - PB_Ratio
     - beta
     - sigma
     - skewness

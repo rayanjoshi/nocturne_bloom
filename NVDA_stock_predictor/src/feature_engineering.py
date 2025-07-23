@@ -86,11 +86,6 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     # --------- Technical Indicators --------- #
     dataFrame['sigma'] = dataFrame['Close'].rolling(window=20).std()
     dataFrame['beta'] = dataFrame['Close'].rolling(window=20).cov(dataFrame['Volume']) / dataFrame['Volume'].rolling(window=20).var()
-    
-    # Use pre-calculated PE/PB ratios from data loader
-    dataFrame['priceToBook'] = dataFrame['PB_Ratio']
-    dataFrame['priceToEarnings'] = dataFrame['PE_Ratio']
-
         
     dataFrame['skewness'] = dataFrame['Close'].rolling(window=20).skew()
 
