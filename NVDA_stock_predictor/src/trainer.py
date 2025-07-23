@@ -28,6 +28,8 @@ def main(cfg: DictConfig):
         callbacks=[checkpoint_callback],
         logger=wandb_logger,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
+        check_val_every_n_epoch=1,  # Run validation every epoch
+        val_check_interval=1.0,     # Run validation at the end of each epoch
     )
     
     

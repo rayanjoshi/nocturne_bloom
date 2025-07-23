@@ -6,10 +6,10 @@ defaults:
 trainer:
   project_name: "NVDA Stock Predictor"
   run_name: "CNN-LSTM"
-  max_epochs: 1000
+  max_epochs: 200
   accelerator: "auto"
   devices: 1
   log_every_n_steps: 10
 
 optimizer:
-  lr: 0.01
+  lr: 0.0001
