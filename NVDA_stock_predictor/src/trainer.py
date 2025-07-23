@@ -1,15 +1,22 @@
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
 checkpoint_callback = ModelCheckpoint(
-    monitor="val_loss",
+    monitor="val_r2",
     dirpath="../logs",
-    filename="model-{epoch:02d}-{val_loss:.2f}",
+    filename="model-{epoch:02d}-{val_r2:.2f}",
     save_top_k=3,
-    mode="min",
+    mode="max",
+)
+
+early_stopping_callback = EarlyStopping(
+    monitor="val_r2",
+    patience=10,
+    mode="max",
+    min_delta=0.005,
 )
 
 @hydra.main(version_base=None, config_path="../configs", config_name="trainer")
@@ -25,7 +32,7 @@ def main(cfg: DictConfig):
         max_epochs=cfg.trainer.max_epochs,
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, early_stopping_callback],
         logger=wandb_logger,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         check_val_every_n_epoch=1,  # Run validation every epoch
