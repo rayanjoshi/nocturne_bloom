@@ -1,0 +1,15 @@
+defaults:
+  - _self_
+  - model_CNNLSTM
+  - data_module
+
+trainer:
+  project_name: "NVDA Stock Predictor"
+  run_name: "CNN-LSTM"
+  max_epochs: 1000
+  accelerator: "auto"
+  devices: 1
+  log_every_n_steps: 10
+
+optimizer:
+  lr: 0.01
