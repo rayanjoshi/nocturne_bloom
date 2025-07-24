@@ -9,10 +9,13 @@ CNNEncoder:
   dropout: 0.2  # Added dropout for regularization
 
 LSTMPredictor:
-  input_size: 128  # Output size of CNNEncoder (CNN_channels[1])
+  input_size: 64  # Output size of CNNEncoder (CNN_channels[1])
   hidden_size: 128  # Increased capacity
-  num_layers: 2    # Deeper LSTM
-  dropout: 0.2
+  num_layers: 3    # Deeper LSTM
+  dropout: 0.3
   bidirectional: false
   output_size: 1
   batch_first: true
+
+model:
+  target_sequence_length: 1  # Predicting the next closing price
