@@ -1,9 +1,12 @@
 CNNEncoder:
   input_channels: 40  # Number of features (RSI, MACD, etc.)
-  CNN_channels: [64, 128]  # Increased capacity
-  kernel_size: [2, 3]
-  padding: [1, 1]  # kernel_size // 2 for each dimension
-  stride: 2
+  CNN_channels: [64, 128, 64]  # Increased capacity
+  kernel_size: [3, 3, 2]
+  pool_size: [2, 2, 1]  # Pooling after each CNN layer
+  pool_padding: [0,0,0]
+  padding: [1, 1, 1]  # kernel_size // 2 for each dimension
+  stride: 1
+  dropout: 0.2  # Added dropout for regularization
 
 LSTMPredictor:
   input_size: 128  # Output size of CNNEncoder (CNN_channels[1])
