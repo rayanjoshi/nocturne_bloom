@@ -110,7 +110,7 @@ class CNNLSTMModel(nn.Module):
         x = x.permute(0, 2, 1)  # [batch_size, 40, 10] - treat features as input channels
         
         cnn_out = self.cnn(x)  # [batch_size, 64, reduced_seq_len]
-        cnn_out = self.adaptive_pool(cnn_out)  # [batch_size, 64, target_sequence_length]
+        #cnn_out = self.adaptive_pool(cnn_out)  # [batch_size, 64, target_sequence_length]
         
         # Prepare for LSTM: [batch_size, seq_len, features]
         lstm_in = cnn_out.permute(0, 2, 1)  # [batch_size, reduced_seq_len, 64]
@@ -124,7 +124,8 @@ class CNNLSTMModule(L.LightningModule):
         self.cfg = cfg
         # Pass the entire config since CNNLSTMModel expects CNNEncoder and LSTMPredictor sections
         self.model = CNNLSTMModel(cfg)
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.HuberLoss(delta=cfg.model.huber_delta)  # Use Huber loss for regression tasks
+        
         self.mae_train = MeanAbsoluteError()
         self.rmse_train = MeanSquaredError()
         self.r2_train = R2Score()
@@ -211,5 +212,10 @@ class CNNLSTMModule(L.LightningModule):
         self.r2_train.reset()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.cfg.optimizer.lr, weight_decay=self.cfg.optimizer.weight_decay)
-        return optimizer
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.cfg.optimizer.lr, weight_decay=self.cfg.optimizer.weight_decay)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': scheduler,
+                'monitor': 'val_loss'
+            }
