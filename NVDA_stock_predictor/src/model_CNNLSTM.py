@@ -46,17 +46,48 @@ class LSTMPredictor(nn.Module):
         output_size = cfg.LSTMPredictor.output_size
         batch_first = cfg.LSTMPredictor.batch_first
         
+        self.lstm_layers = nn.ModuleList()
+        self.layer_norms = nn.ModuleList()
+        self.dropouts = nn.ModuleList()
+        
+        for i in range(num_layers):
+            layer_input_size = input_size if i == 0 else hidden_size * (2 if bidirectional else 1)
+            
         self.lstm = nn.LSTM (
-            input_size, 
+            layer_input_size, 
             hidden_size, 
             num_layers, 
             bidirectional=bidirectional, 
             dropout=dropout if num_layers > 1 else 0.0, 
             batch_first=batch_first)
-        self.fc = nn.Linear(hidden_size * (2 if bidirectional else 1), output_size)
+        self.lstm_layers.append(self.lstm)
+        
+        self.layer_norms.append(nn.LayerNorm(hidden_size * (2 if bidirectional else 1)))
+        self.dropouts.append(nn.Dropout(dropout if num_layers > 1 else 0.0))
+        
+        final_hidden_size = hidden_size * (2 if bidirectional else 1)
+        self.fc1 = nn.Linear(final_hidden_size, final_hidden_size // 2)
+        self.fc2 = nn.Linear(final_hidden_size // 2, output_size)
+        self.dropout_final = nn.Dropout(dropout)
+
     def forward(self, x):
-        lstm_out, _ = self.lstm(x)
-        x = self.fc(lstm_out[:, -1, :])
+        for i, (lstm_layer, layer_norm, dropout) in enumerate(zip(self.lstm_layers, self.layer_norms, self.dropouts)):
+            lstm_out, _ = lstm_layer(x)
+            
+            # Apply layer normalization and dropout (except for last layer)
+            if i < len(self.lstm_layers) - 1:
+                lstm_out = layer_norm(lstm_out)
+                lstm_out = dropout(lstm_out)
+                x = lstm_out
+            else:
+                # For the last layer, take only the final time step
+                x = lstm_out[:, -1, :]
+        
+        # Final prediction layers
+        x = torch.relu(self.fc1(x))
+        x = self.dropout_final(x)
+        x = self.fc2(x)
+        
         return x
 
 class CNNLSTMModel(nn.Module):
@@ -64,6 +95,8 @@ class CNNLSTMModel(nn.Module):
         super().__init__()
         self.cnn = CNNFeatureExtractor(cfg)
         self.lstm = LSTMPredictor(cfg)
+        
+        self.adaptive_pool = nn.AdaptiveAvgPool1d(cfg.model.target_sequence_length)
 
     def forward(self, x):
         # Input shape: [batch_size, seq_len, features] = [batch_size, 10, 40]
@@ -72,6 +105,7 @@ class CNNLSTMModel(nn.Module):
         x = x.permute(0, 2, 1)  # [batch_size, 40, 10] - treat features as input channels
         
         cnn_out = self.cnn(x)  # [batch_size, 64, reduced_seq_len]
+        cnn_out = self.adaptive_pool(cnn_out)  # [batch_size, 64, target_sequence_length]
         
         # Prepare for LSTM: [batch_size, seq_len, features]
         lstm_in = cnn_out.permute(0, 2, 1)  # [batch_size, reduced_seq_len, 64]
