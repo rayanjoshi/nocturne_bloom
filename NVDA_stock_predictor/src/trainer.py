@@ -2,6 +2,7 @@ from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 import hydra
+import torch
 from omegaconf import DictConfig, OmegaConf
 
 checkpoint_callback = ModelCheckpoint(
@@ -37,6 +38,7 @@ def main(cfg: DictConfig):
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         check_val_every_n_epoch=1,  # Run validation every epoch
         val_check_interval=1.0,     # Run validation at the end of each epoch
+        deterministic = True,
     )
     
     
@@ -46,6 +48,7 @@ def main(cfg: DictConfig):
     model = CNNLSTMModule(cfg)
     data_module = StockDataModule(cfg)
 
+    torch.manual_seed(cfg.trainer.seed)
     trainer.fit(model, datamodule=data_module)
     
 if __name__ == "__main__":

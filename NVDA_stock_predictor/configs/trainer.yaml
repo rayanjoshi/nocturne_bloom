@@ -10,6 +10,7 @@ trainer:
   accelerator: "auto"
   devices: 1
   log_every_n_steps: 10
+  seed: 1
 
 optimizer:
   lr: 0.0001
