@@ -14,9 +14,9 @@ checkpoint_callback = ModelCheckpoint(
 )
 
 early_stopping_callback = EarlyStopping(
-    monitor="val_r2",
+    monitor="val_loss",
     patience=10,
-    mode="max",
+    mode="min",
     min_delta=0.005,
 )
 
