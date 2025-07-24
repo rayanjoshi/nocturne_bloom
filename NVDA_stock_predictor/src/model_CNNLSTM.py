@@ -14,12 +14,21 @@ class CNNFeatureExtractor(nn.Module):
         CNN_channels = [cfg.CNNEncoder.CNN_channels[0], cfg.CNNEncoder.CNN_channels[1]]
         self.CNN = nn.Sequential(
             nn.Conv1d(input_channels, CNN_channels[0], kernel_size=cfg.CNNEncoder.kernel_size[0], padding=cfg.CNNEncoder.padding[0]),
+            nn.BatchNorm1d(CNN_channels[0]),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=cfg.CNNEncoder.kernel_size[0], stride=cfg.CNNEncoder.stride),
+            nn.Dropout(cfg.CNNEncoder.dropout),
+            
+            nn.Conv1d(CNN_channels[0], CNN_channels[1], kernel_size=cfg.CNNEncoder.kernel_size[1], padding=cfg.CNNEncoder.padding[1]),
+            nn.BatchNorm1d(CNN_channels[1]),
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=cfg.CNNEncoder.kernel_size[1], stride=cfg.CNNEncoder.stride),
-            
-            nn.Conv1d(CNN_channels[0], CNN_channels[1], kernel_size=cfg.CNNEncoder.kernel_size[0], padding=cfg.CNNEncoder.padding[1]),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=cfg.CNNEncoder.kernel_size[1], stride=cfg.CNNEncoder.stride)
+            nn.Dropout(cfg.CNNEncoder.dropout),
+
+            nn.Conv1d(CNN_channels[1], CNN_channels[2], kernel_size=cfg.CNNEncoder.kernel_size[2], padding=cfg.CNNEncoder.padding[2]),
+            nn.BatchNorm1d(CNN_channels[2]),
+            nn.ReLU(), # No pooling after last CNN layer
+            nn.Dropout(cfg.CNNEncoder.dropout)
         )
     def forward(self, x):
         x = self.CNN(x)
