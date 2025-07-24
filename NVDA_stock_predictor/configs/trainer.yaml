@@ -13,4 +13,5 @@ trainer:
   seed: 1
 
 optimizer:
-  lr: 0.001
+  lr: 0.0001
+  weight_decay: 1e-5
