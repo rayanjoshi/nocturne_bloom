@@ -133,7 +133,7 @@ class StockDataModule(L.LightningDataModule):
         return DataLoader(
             SimpleTensorDataset(self.train_x, self.train_y),
             batch_size=self.cfg.data_module.batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=self.cfg.data_module.num_workers,
             persistent_workers=True
         )
