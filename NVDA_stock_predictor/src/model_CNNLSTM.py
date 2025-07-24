@@ -53,26 +53,32 @@ class LSTMPredictor(nn.Module):
         for i in range(num_layers):
             layer_input_size = input_size if i == 0 else hidden_size * (2 if bidirectional else 1)
             
-        self.lstm = nn.LSTM (
-            layer_input_size, 
-            hidden_size, 
-            num_layers, 
-            bidirectional=bidirectional, 
-            dropout=dropout if num_layers > 1 else 0.0, 
-            batch_first=batch_first)
-        self.lstm_layers.append(self.lstm)
-        
-        self.layer_norms.append(nn.LayerNorm(hidden_size * (2 if bidirectional else 1)))
-        self.dropouts.append(nn.Dropout(dropout if num_layers > 1 else 0.0))
+            lstm_layer = nn.LSTM(
+                layer_input_size, 
+                hidden_size, 
+                num_layers=1, 
+                bidirectional=bidirectional, 
+                dropout=0.0, 
+                batch_first=batch_first
+            )
+            self.lstm_layers.append(lstm_layer)
+            self.layer_norms.append(nn.LayerNorm(hidden_size * (2 if bidirectional else 1)))
+            self.dropouts.append(nn.Dropout(dropout if num_layers > 1 else 0.0))
         
         final_hidden_size = hidden_size * (2 if bidirectional else 1)
-        self.fc1 = nn.Linear(final_hidden_size, final_hidden_size // 2)
-        self.fc2 = nn.Linear(final_hidden_size // 2, output_size)
-        self.dropout_final = nn.Dropout(dropout)
+        self.fc_layers = nn.Sequential(
+            nn.Linear(final_hidden_size, final_hidden_size // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(final_hidden_size // 2, final_hidden_size // 4),   
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(final_hidden_size // 4, output_size)            
+            )
 
     def forward(self, x):
         for i, (lstm_layer, layer_norm, dropout) in enumerate(zip(self.lstm_layers, self.layer_norms, self.dropouts)):
-            lstm_out, _ = lstm_layer(x)
+            lstm_out, (h_n, c_n) = lstm_layer(x)
             
             # Apply layer normalization and dropout (except for last layer)
             if i < len(self.lstm_layers) - 1:
@@ -84,10 +90,9 @@ class LSTMPredictor(nn.Module):
                 x = lstm_out[:, -1, :]
         
         # Final prediction layers
-        x = torch.relu(self.fc1(x))
-        x = self.dropout_final(x)
-        x = self.fc2(x)
-        
+        x = self.fc_layers(x)
+
+
         return x
 
 class CNNLSTMModel(nn.Module):
@@ -120,32 +125,37 @@ class CNNLSTMModule(L.LightningModule):
         # Pass the entire config since CNNLSTMModel expects CNNEncoder and LSTMPredictor sections
         self.model = CNNLSTMModel(cfg)
         self.criterion = nn.MSELoss()
-        self.mae = MeanAbsoluteError()
-        self.rmse = MeanSquaredError()
-        self.r2 = R2Score()
-    
+        self.mae_train = MeanAbsoluteError()
+        self.rmse_train = MeanSquaredError()
+        self.r2_train = R2Score()
+        self.mae_val = MeanAbsoluteError()
+        self.rmse_val = MeanSquaredError()
+        self.r2_val = R2Score()
+
     def forward(self, x):
         return self.model(x)
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x).squeeze(-1)
+        if y_hat.dim() != y.dim():
+            y_hat = y_hat.view_as(y)
         loss = self.criterion(y_hat, y)
-        
-        self.mae.update(y_hat, y)
-        self.rmse.update(y_hat, y)
-        self.r2.update(y_hat, y)
-        
+
+        self.mae_val.update(y_hat, y)
+        self.rmse_val.update(y_hat, y)
+        self.r2_val.update(y_hat, y)
+
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
         
         return loss
     
     def on_validation_epoch_end(self):
         avg_loss = self.trainer.callback_metrics.get('val_loss', 0.0)
-        avg_mae = self.mae.compute()
-        avg_rmse = torch.sqrt(self.rmse.compute())
-        avg_r2 = self.r2.compute()
-        
+        avg_mae = self.mae_val.compute()
+        avg_rmse = torch.sqrt(self.rmse_val.compute())
+        avg_r2 = self.r2_val.compute()
+
         self.log('val_mae', avg_mae, prog_bar=True)
         self.log('val_rmse', avg_rmse, prog_bar=True)
         self.log('val_r2', avg_r2, prog_bar=True)
@@ -158,18 +168,48 @@ class CNNLSTMModule(L.LightningModule):
         print(f"--------- Validation Complete ---------\n")
 
         # Reset metrics for next epoch
-        self.mae.reset()
-        self.rmse.reset()
-        self.r2.reset()
+        self.mae_val.reset()
+        self.rmse_val.reset()
+        self.r2_val.reset()
 
 
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x).squeeze(-1)  # Remove the last dimension if needed
+        if y_hat.dim() != y.dim():
+            y_hat = y_hat.view_as(y)  # Ensure y_hat has the same shape as y 
+        
+        self.mae_train.update(y_hat, y)
+        self.rmse_train.update(y_hat, y)
+        self.r2_train.update(y_hat, y)
+        
         loss = self.criterion(y_hat, y)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
+    
+    def on_train_epoch_end(self):
+        avg_loss = self.trainer.callback_metrics.get('train_loss', 0.0)
+        avg_mae = self.mae_train.compute()
+        avg_rmse = torch.sqrt(self.rmse_train.compute())
+        avg_r2 = self.r2_train.compute()
+
+        self.log('train_mae', avg_mae, prog_bar=True)
+        self.log('train_rmse', avg_rmse, prog_bar=True)
+        self.log('train_r2', avg_r2, prog_bar=True)
+        
+        print(f"\n \n")
+        print(f"\n --------- Training Results ---------")
+        print(f"Loss: {avg_loss:.4f}")
+        print(f"MAE: {avg_mae:.4f}")
+        print(f"RMSE: {avg_rmse:.4f}")
+        print(f"R2: {avg_r2:.4f}")
+        print(f"--------- Training Complete ---------\n")
+
+        # Reset metrics for next epoch
+        self.mae_train.reset()
+        self.rmse_train.reset()
+        self.r2_train.reset()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.cfg.optimizer.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.cfg.optimizer.lr, weight_decay=self.cfg.optimizer.weight_decay)
         return optimizer
