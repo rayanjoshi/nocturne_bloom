@@ -4,7 +4,9 @@ import torch.nn.functional as F
 from torchmetrics import MeanAbsoluteError, MeanSquaredError
 from torchmetrics.regression import R2Score
 from torchvision import transforms
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, LogisticRegression, SVC, VotingClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 import lightning as L
 from omegaconf import DictConfig
 import numpy as np
@@ -143,6 +145,50 @@ def directionalFeatures(self, cfg: DictConfig, xTensor):
     finalFeatures = np.concatenate(features, axis=1)
     return finalFeatures
 
+def directionalClassifiers(self, cfg: DictConfig):
+    self.directinalClassifiers = {
+        'gradientBoosting': GradientBoostingClassifier(
+            numEstimators = cfg.classifiers.numEstimators[0],
+            learningRate = cfg.classifiers.learningRate,
+            maxDepth = cfg.classifiers.maxDepth[0],
+            subsample = cfg.classifiers.subSample,
+            minSamplesSplit = cfg.classifiers.minSamplesSplit[0],
+            minSamplesLeaf = cfg.classifiers.minSamplesLeaf[0],
+            randomState = cfg.classifiers.randomState
+            ),
+        'randomForest': RandomForestClassifier(
+            numEstimators = cfg.classifiers.numEstimators[1],
+            maxDepth = cfg.classifiers.maxDepth[1],
+            minSamplesSplit = cfg.classifiers.minSamplesSplit[1],
+            minSamplesLeaf = cfg.classifiers.minSamplesLeaf[1],
+            maxFeatures = cfg.classifiers.maxFeatures,
+            classWeight = cfg.classifiers.classWeight,
+            randomState = cfg.classifiers.randomState
+            ),
+        'logisticRegression': LogisticRegression(
+            C = cfg.classifiers.C[0],
+            solver = cfg.classifiers.solver,
+            classWeight = cfg.classifiers.classWeight,
+            maxIter = cfg.classifiers.maxIterations,
+            randomState = cfg.classifiers.randomState
+        ),
+        'svm': SVC(
+            C = cfg.classifiers.C[1],
+            kernel = cfg.classifiers.kernel,
+            probability = cfg.classifiers.probability,
+            classWeight = cfg.classifiers.classWeight,
+            randomState = cfg.classifiers.randomState
+        )
+    }
+    self.voting_classifier = VotingClassifier(
+    estimators=list(self.directionalClassifiers.items()),
+    voting='soft',
+    weights=[0.3, 0.3, 0.2, 0.2]  # Optimized weights
+    )
+    
+    self.featureScaler = StandardScaler()
+    self.directionalThreshold = 0.5
+    
 """
 class ensembleModule(L.LightningModule):
     def __init__(self, cfg):
