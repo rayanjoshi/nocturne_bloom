@@ -57,12 +57,13 @@ class CNN(nn.Module):
 class magnitudeEnsemble(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
+        self.cfg = cfg
         self.cnn = CNN(cfg)
         self.ridge = Ridge(cfg.ridge.alpha)
         self.ridgeFitted = False
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-    def forward(self, cfg, x):
+    def forward(self, x):
         cnnPredictions = self.cnn(x)
         if self.ridgeFitted:
             xFlat = x.view(x.size(0), -1)
@@ -71,8 +72,7 @@ class magnitudeEnsemble(nn.Module):
             else:
                 xFlat_CPU = xFlat.detach().numpy()
             ridgePredictions = torch.tensor(self.ridge.predict(xFlat_CPU), dtype=torch.float32, device=self.device)
-
-            finalPredictions = cfg.model.cnnWeight * cnnPredictions + cfg.model.ridgeWeight * ridgePredictions
+            finalPredictions = self.cfg.model.cnnWeight * cnnPredictions + self.cfg.model.ridgeWeight * ridgePredictions
             return finalPredictions
         else:
             return cnnPredictions
@@ -90,42 +90,42 @@ class magnitudeEnsemble(nn.Module):
         self.ridge.fit(xFlat_CPU, yCPU)
         self.ridgeFitted = True
 
-def directionalFeatures( cfg: DictConfig, xTensor):
+def directionalFeatures(xTensor):
     batchSize, numFeatures, sequenceLength = xTensor.shape
     features = []
     if xTensor.is_cuda:
         xTensor_np = xTensor.detach().cpu().numpy()
     else:
-        xTensor_np = xTensor.detach().numpy
-    currentFeatures = xTensor_np[:, -1,:].numpy()
+        xTensor_np = xTensor.detach().numpy()
+    currentFeatures = xTensor_np[:, -1,:]
     features.append(currentFeatures)
     
     if sequenceLength >= 2:
-        shortMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -2, :]).numpy()
+        shortMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -2, :])
         features.append(shortMomentum)
     
     if sequenceLength >= 3:
-        medMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -3, :]).numpy()
+        medMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -3, :])
         features.append(medMomentum)
     
     if sequenceLength >= 5:
-        longMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -5, :]).numpy()
+        longMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -5, :])
         features.append(longMomentum)
     
     if sequenceLength >= 3:
-        recentVolatility = torch.std(xTensor_np[:, -3:, :], dim=1).numpy()
+        recentVolatility =  np.std(xTensor_np[:, -3:, :], axis=1)
         features.append(recentVolatility)
     
     if sequenceLength >= 5:
-        mediumVolatility = torch.std(xTensor_np[:, -5:, :], dim=1).numpy()
+        mediumVolatility = np.std(xTensor_np[:, -5:, :], axis=1)
         features.append(mediumVolatility)
-    
-    fullVolatility = torch.std(xTensor_np, dim=1).numpy()
+
+    fullVolatility = np.std(xTensor_np, axis=1)
     features.append(fullVolatility)
     
     skewnessFeature = []
     for i in range(batchSize):
-        sampleData = xTensor_np[i, :, :].numpy()
+        sampleData = xTensor_np[i, :, :]
         meanValue = np.mean(sampleData, axis=1, keepdims=True)
         stdDev = np.std(sampleData, axis=1, keepdims=True)
         stdDev = np.where(stdDev == 0, 1e-8, stdDev) # Avoid division by zero
