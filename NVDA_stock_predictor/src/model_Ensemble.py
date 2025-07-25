@@ -19,13 +19,13 @@ class CNN(nn.Module):
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=cfg.cnn.poolSize[0], stride=cfg.cnn.stride, padding=cfg.cnn.poolPadding[0]),
             nn.Dropout(cfg.cnn.dropout[0]),
-
+            
             nn.Conv1d(cnnChannels[0], cnnChannels[1], kernel_size=cfg.cnn.kernelSize[1], padding=cfg.cnn.padding[1]),
             nn.BatchNorm1d(cnnChannels[1]),
             nn.ReLU(),
             nn.MaxPool1d(kernel_size=cfg.cnn.poolSize[1], stride=cfg.cnn.stride, padding=cfg.cnn.poolPadding[1]),
             nn.Dropout(cfg.cnn.dropout[0]),
-
+            
             nn.Conv1d(cnnChannels[1], cnnChannels[2], kernel_size=cfg.cnn.kernelSize[2], padding=cfg.cnn.padding[2]),
             nn.BatchNorm1d(cnnChannels[2]),
             nn.ReLU(),
@@ -51,6 +51,27 @@ class CNN(nn.Module):
         x = x.squeeze(-1)
         return x
 
+class magnitudeEnsemble(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        super().__init__()
+        self.cnn = CNN(cfg)
+        self.ridge = Ridge(cfg.ridge.alpha)
+        self.ridgeFitted = False
+        
+    def forward(self, cfg, x):
+        cnnPredictions = self.cnn(x)
+        if self.ridgeFitted:
+            x_flat = x.view(x.size(0), -1).detach().numpy()
+            ridgePredictions = torch.tensor(self.ridge.predict(x_flat), dtype=torch.float32)
+
+            finalPredictions = cfg.model.cnnWeight * cnnPredictions + cfg.model.ridgeWeight * ridgePredictions
+            return finalPredictions
+        else:
+            return cnnPredictions
+    def fitRidge(self, x, y):
+        xFlat = x.view(x.size(0), -1).detach().numpy()
+        self.ridge.fit(xFlat, y.detach().numpy())
+        self.ridgeFitted = True
 
 """
 class ensembleModule(L.LightningModule):
