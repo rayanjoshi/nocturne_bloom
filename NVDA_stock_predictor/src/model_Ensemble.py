@@ -4,38 +4,55 @@ import torch.nn.functional as F
 from torchmetrics import MeanAbsoluteError, MeanSquaredError
 from torchmetrics.regression import R2Score
 from torchvision import transforms
+from sklearn.linear_model import Ridge
 import lightning as L
 from omegaconf import DictConfig
 import numpy as np
-class CNNFeatureExtractor(nn.Module):
+class CNN(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
-        input_channels = cfg.CNNEncoder.input_channels
-        CNN_channels = [cfg.CNNEncoder.CNN_channels[0], cfg.CNNEncoder.CNN_channels[1], cfg.CNNEncoder.CNN_channels[2]]
-        self.CNN = nn.Sequential(
-            nn.Conv1d(input_channels, CNN_channels[0], kernel_size=cfg.CNNEncoder.kernel_size[0], padding=cfg.CNNEncoder.padding[0]),
-            nn.BatchNorm1d(CNN_channels[0]),
+        inputChannels = cfg.cnn.inputChannels
+        cnnChannels = [cfg.cnn.cnnChannels[0], cfg.cnn.cnnChannels[1], cfg.cnn.cnnChannels[2]]
+        self.cnn = nn.Sequential(
+            nn.Conv1d(inputChannels, cnnChannels[0], kernel_size=cfg.cnn.kernelSize[0], padding=cfg.cnn.padding[0]),
+            nn.BatchNorm1d(cnnChannels[0]),
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=cfg.CNNEncoder.pool_size[0], stride=cfg.CNNEncoder.stride, padding=cfg.CNNEncoder.pool_padding[0]),
-            nn.Dropout(cfg.CNNEncoder.dropout),
-            
-            nn.Conv1d(CNN_channels[0], CNN_channels[1], kernel_size=cfg.CNNEncoder.kernel_size[1], padding=cfg.CNNEncoder.padding[1]),
-            nn.BatchNorm1d(CNN_channels[1]),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=cfg.CNNEncoder.pool_size[1], stride=cfg.CNNEncoder.stride, padding=cfg.CNNEncoder.pool_padding[1]),
-            nn.Dropout(cfg.CNNEncoder.dropout),
+            nn.MaxPool1d(kernel_size=cfg.cnn.poolSize[0], stride=cfg.cnn.stride, padding=cfg.cnn.poolPadding[0]),
+            nn.Dropout(cfg.cnn.dropout[0]),
 
-            nn.Conv1d(CNN_channels[1], CNN_channels[2], kernel_size=cfg.CNNEncoder.kernel_size[2], padding=cfg.CNNEncoder.padding[2]),
-            nn.BatchNorm1d(CNN_channels[2]),
+            nn.Conv1d(cnnChannels[0], cnnChannels[1], kernel_size=cfg.cnn.kernelSize[1], padding=cfg.cnn.padding[1]),
+            nn.BatchNorm1d(cnnChannels[1]),
             nn.ReLU(),
-            nn.MaxPool1d(kernel_size=cfg.CNNEncoder.pool_size[2], stride=cfg.CNNEncoder.stride, padding=cfg.CNNEncoder.pool_padding[2]),
-            nn.Dropout(cfg.CNNEncoder.dropout)
+            nn.MaxPool1d(kernel_size=cfg.cnn.poolSize[1], stride=cfg.cnn.stride, padding=cfg.cnn.poolPadding[1]),
+            nn.Dropout(cfg.cnn.dropout[0]),
+
+            nn.Conv1d(cnnChannels[1], cnnChannels[2], kernel_size=cfg.cnn.kernelSize[2], padding=cfg.cnn.padding[2]),
+            nn.BatchNorm1d(cnnChannels[2]),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(kernel_size=1),
+            nn.Dropout(cfg.cnn.dropout[0])
         )
+        
+        self.fc_layer = nn.Sequential(
+            nn.Linear(cnnChannels[0], cnnChannels[1]),
+            nn.ReLU(),
+            nn.Dropout(cfg.cnn.dropout[1]),
+            nn.Linear(cnnChannels[1], cnnChannels[2]),
+            nn.ReLU(),
+            nn.Dropout(cfg.cnn.dropout[0]),
+            nn.Linear(cnnChannels[2], cfg.cnn.outputSize)
+        )
+        
     def forward(self, x):
-        x = self.CNN(x)
+        x = x.transpose(1, 2)
+        x = self.cnn(x)
+        x = x.squeeze(-1)
+        x = self.fc_layer(x)
+        x = x.squeeze(-1)
         return x
 
-""""
+
+"""
 class ensembleModule(L.LightningModule):
     def __init__(self, cfg):
         super().__init__()
