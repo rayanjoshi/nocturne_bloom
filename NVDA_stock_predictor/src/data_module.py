@@ -7,7 +7,7 @@ import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 from omegaconf import DictConfig
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 
 class SimpleTensorDataset(Dataset):
     """Simple dataset for tensor data used in Lightning dataloaders"""
@@ -42,18 +42,62 @@ class StockDataset(Dataset):
         x = np.array(x)
         y = np.array(y)
         
-        target_scaler = MinMaxScaler()
-        y_scaled = target_scaler.fit_transform(y.reshape(-1, 1)).flatten()
+        print(f"Created {len(x)} windows with shape {x.shape}")
+        print(f"Target range before scaling: [{y.min():.6f}, {y.max():.6f}]")
         
+        # CRITICAL FIX: Split BEFORE scaling to avoid data leakage
+        split_ratio = cfg.data_module.train_val_split
+        split_idx = int(len(y) * split_ratio)
+        
+        x_train, x_val = x[:split_idx], x[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
+        
+        print(f"Train/Val split: {len(x_train)}/{len(x_val)} samples")
+        print(f"Train targets range: [{y_train.min():.6f}, {y_train.max():.6f}]")
+        print(f"Val targets range: [{y_val.min():.6f}, {y_val.max():.6f}]")
+        
+        # Scale features (fit on train only)
+        print("Scaling features...")
+        feature_scaler = StandardScaler()
+        
+        # Reshape for scaling: (samples * timesteps, features)
+        x_train_reshaped = x_train.reshape(-1, x_train.shape[-1])
+        x_train_scaled = feature_scaler.fit_transform(x_train_reshaped)
+        x_train_scaled = x_train_scaled.reshape(x_train.shape)
+        
+        x_val_reshaped = x_val.reshape(-1, x_val.shape[-1])
+        x_val_scaled = feature_scaler.transform(x_val_reshaped)
+        x_val_scaled = x_val_scaled.reshape(x_val.shape)
+        
+        # Scale targets (fit on train only)
+        print("Scaling targets...")
+        target_scaler = StandardScaler()
+        y_train_scaled = target_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
+        y_val_scaled = target_scaler.transform(y_val.reshape(-1, 1)).flatten()
+        
+        print(f"Train targets after scaling: [{y_train_scaled.min():.6f}, {y_train_scaled.max():.6f}]")
+        print(f"Val targets after scaling: [{y_val_scaled.min():.6f}, {y_val_scaled.max():.6f}]")
+        
+        # Combine back maintaining temporal order
+        x_scaled = np.concatenate([x_train_scaled, x_val_scaled])
+        y_scaled = np.concatenate([y_train_scaled, y_val_scaled])
+        
+        # Save scalers
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
         
-        y_scaled_save_path = repo_root / cfg.data_module.y_scaled_save_path.lstrip('../')
-        y_scaled_save_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(target_scaler, y_scaled_save_path)
-        print(f"Target scaler saved to: {y_scaled_save_path.absolute()}")
+        feature_scaler_path = repo_root / "models/feature_scaler.pkl"
+        target_scaler_path = repo_root / cfg.data_module.y_scaled_save_path.lstrip('../')
         
-        y = y_scaled  # Use scaled target for training
+        feature_scaler_path.parent.mkdir(parents=True, exist_ok=True)
+        target_scaler_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        joblib.dump(feature_scaler, feature_scaler_path)
+        joblib.dump(target_scaler, target_scaler_path)
+        
+        print(f"Feature scaler saved to: {feature_scaler_path.absolute()}")
+        print(f"Target scaler saved to: {target_scaler_path.absolute()}")
+        print(f"Scalers fitted on training data only: {len(y_train)} samples")
         
         # Save numpy arrays to sequence_processing directory 
         x_save_path = repo_root / cfg.data_processor.x_load_path.lstrip('../')
@@ -67,9 +111,11 @@ class StockDataset(Dataset):
         x_save_path = x_save_path.with_suffix('')
         y_save_path = y_save_path.with_suffix('')
 
-        np.save(x_save_path, x)
-        np.save(y_save_path, y)
-        return x, y
+        np.save(x_save_path, x_scaled)
+        np.save(y_save_path, y_scaled)
+        print(f"Scaled data saved to: {x_save_path}.npy and {y_save_path}.npy")
+        
+        return x_scaled, y_scaled
     
     def __len__(self):
         return len(self.y)
@@ -139,6 +185,16 @@ class StockDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self):
+        return DataLoader(
+            SimpleTensorDataset(self.val_x, self.val_y),
+            batch_size=self.cfg.data_module.batch_size,
+            shuffle=False,
+            num_workers=self.cfg.data_module.num_workers,
+            persistent_workers=True
+        )
+
+    def test_dataloader(self):
+        # Use validation set for testing
         return DataLoader(
             SimpleTensorDataset(self.val_x, self.val_y),
             batch_size=self.cfg.data_module.batch_size,
