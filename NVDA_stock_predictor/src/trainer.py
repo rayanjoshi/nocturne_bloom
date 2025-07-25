@@ -13,19 +13,23 @@ checkpoint_callback = ModelCheckpoint(
     mode="max",
 )
 
-early_stopping_callback = EarlyStopping(
-    monitor="val_loss",
-    patience=10,
-    mode="min",
-    min_delta=0.005,
-)
-
 @hydra.main(version_base=None, config_path="../configs", config_name="trainer")
 def main(cfg: DictConfig):
     wandb_logger = WandbLogger(
         project=cfg.trainer.project_name,
         name=cfg.trainer.run_name,
         save_dir="../logs"
+    )
+    
+    # Configure early stopping from config
+    early_stopping_patience = getattr(cfg.trainer, 'early_stopping_patience', 10)
+    early_stopping_delta = getattr(cfg.trainer, 'early_stopping_delta', 0.005)
+    
+    early_stopping_callback = EarlyStopping(
+        monitor="val_loss",
+        patience=early_stopping_patience,
+        mode="min",
+        min_delta=early_stopping_delta,
     )
     
     # Create the Trainer instance
