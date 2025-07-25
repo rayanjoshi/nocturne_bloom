@@ -36,7 +36,7 @@ class CNN(nn.Module):
         )
         
         self.fc_layer = nn.Sequential(
-            nn.Linear(cnnChannels[0], cnnChannels[1]),
+            nn.Linear(cnnChannels[2], cnnChannels[1]),
             nn.ReLU(),
             nn.Dropout(cfg.cnn.dropout[1]),
             nn.Linear(cnnChannels[1], cnnChannels[2]),
@@ -50,7 +50,8 @@ class CNN(nn.Module):
         x = self.cnn(x)
         x = x.squeeze(-1)
         x = self.fc_layer(x)
-        x = x.squeeze(-1)
+        if x.dim() > 1 and x.size(-1) == 1:
+            x = x.squeeze(-1)
         return x
 
 class magnitudeEnsemble(nn.Module):
@@ -59,82 +60,102 @@ class magnitudeEnsemble(nn.Module):
         self.cnn = CNN(cfg)
         self.ridge = Ridge(cfg.ridge.alpha)
         self.ridgeFitted = False
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
     def forward(self, cfg, x):
         cnnPredictions = self.cnn(x)
         if self.ridgeFitted:
-            x_flat = x.view(x.size(0), -1).detach().numpy()
-            ridgePredictions = torch.tensor(self.ridge.predict(x_flat), dtype=torch.float32)
-            
+            xFlat = x.view(x.size(0), -1)
+            if xFlat.is_cuda:
+                xFlat_CPU = xFlat.detach().cpu().numpy()
+            else:
+                xFlat_CPU = xFlat.detach().numpy()
+            ridgePredictions = torch.tensor(self.ridge.predict(xFlat_CPU), dtype=torch.float32, device=self.device)
+
             finalPredictions = cfg.model.cnnWeight * cnnPredictions + cfg.model.ridgeWeight * ridgePredictions
             return finalPredictions
         else:
             return cnnPredictions
+        
     def fitRidge(self, x, y):
-        xFlat = x.view(x.size(0), -1).detach().numpy()
-        self.ridge.fit(xFlat, y.detach().numpy())
+        xFlat = x.view(x.size(0), -1)
+        if xFlat.is_cuda:
+            xFlat_CPU = xFlat.detach().cpu().numpy()
+        else:
+            xFlat_CPU = xFlat.detach().numpy()
+        if y.is_cuda:
+            yCPU = y.detach().cpu().numpy()
+        else:
+            yCPU = y.detach().numpy()
+        self.ridge.fit(xFlat_CPU, yCPU)
         self.ridgeFitted = True
 
-def directionalFeatures(self, cfg: DictConfig, xTensor):
+def directionalFeatures( cfg: DictConfig, xTensor):
     batchSize, numFeatures, sequenceLength = xTensor.shape
     features = []
-    currentFeatures = xTensor[:, -1,:].numpy()
+    if xTensor.is_cuda:
+        xTensor_np = xTensor.detach().cpu().numpy()
+    else:
+        xTensor_np = xTensor.detach().numpy
+    currentFeatures = xTensor_np[:, -1,:].numpy()
     features.append(currentFeatures)
     
     if sequenceLength >= 2:
-        shortMomentum = (xTensor[:, -1, :] - xTensor[:, -2, :]).numpy()
+        shortMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -2, :]).numpy()
         features.append(shortMomentum)
     
     if sequenceLength >= 3:
-        medMomentum = (xTensor[:, -1, :] - xTensor[:, -3, :]).numpy()
+        medMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -3, :]).numpy()
         features.append(medMomentum)
     
     if sequenceLength >= 5:
-        longMomentum = (xTensor[:, -1, :] - xTensor[:, -5, :]).numpy()
+        longMomentum = (xTensor_np[:, -1, :] - xTensor_np[:, -5, :]).numpy()
         features.append(longMomentum)
     
     if sequenceLength >= 3:
-        recentVolatility = torch.std(xTensor[:, -3:, :], dim=1).numpy()
+        recentVolatility = torch.std(xTensor_np[:, -3:, :], dim=1).numpy()
         features.append(recentVolatility)
     
     if sequenceLength >= 5:
-        mediumVolatility = torch.std(xTensor[:, -5:, :], dim=1).numpy()
+        mediumVolatility = torch.std(xTensor_np[:, -5:, :], dim=1).numpy()
         features.append(mediumVolatility)
     
-    fullVolatility = torch.std(xTensor, dim=1).numpy()
+    fullVolatility = torch.std(xTensor_np, dim=1).numpy()
     features.append(fullVolatility)
     
     skewnessFeature = []
     for i in range(batchSize):
-        sampleData = xTensor[i, :, :].numpy()
-        meanValue = np.mean(sampleData, axis=1)
-        stdDev = np.std(sampleData, axis=1)
-        skewnessValue = torch.mean(((sampleData - meanValue) / stdDev) ** 3, dim=0)
-    skewnessFeature.append(skewnessValue.numpy())
+        sampleData = xTensor_np[i, :, :].numpy()
+        meanValue = np.mean(sampleData, axis=1, keepdims=True)
+        stdDev = np.std(sampleData, axis=1, keepdims=True)
+        stdDev = np.where(stdDev == 0, 1e-8, stdDev) # Avoid division by zero
+        skewnessValue = np.mean(((sampleData - meanValue) / stdDev) ** 3, axis= 1)
+    skewnessFeature.append(skewnessValue)
     features.append(np.array(skewnessFeature))
     
-    trendFeature =[]
-    for i in range(numFeatures):
-        for j in range(batchSize):
+    trendFeatures =[]
+    for i in range(batchSize):
+        batchTrends = []
+        for j in range(numFeatures):
             xValues = np.arange(sequenceLength)
-            yValues = xTensor[j, :, i].numpy()
+            yValues = xTensor_np[i, j, :]
             if len(np.unique(yValues)) > 1:
-                trend = np.corrcoef(xValues, yValues)[0, 1]
+                correlationMatrix = np.corrcoef(xValues, yValues)[0, 1]
+                trend = correlationMatrix[0, 1] if not np.isnan(correlationMatrix[0, 1]) else 0.0
             else:
                 trend = 0.0
-                trendFeature.append(trend)
-        trends.append(trendFeature)
-    trends = np.array(trends).T
-    features.append(trends)
-    
-    topFeatures_idx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-    
+                batchTrends.append(trend)
+        trendFeatures.append(batchTrends)
+    features.append(trendFeatures)
+
+    topFeatures_idx = list(range(min(10, len(features))))
     for i in range(len(topFeatures_idx)):
         for j in range(i+1, min(i+4, len(topFeatures_idx))):
             idx1, idx2 = topFeatures_idx[i], topFeatures_idx[j]
-            interactionFeature = (features[idx1] * features[idx2])
-            features.append(interactionFeature.reshape(-1, 1))
-    
+            if features[idx1].shape == features[idx2].shape:
+                interactionFeature = (features[idx1] * features[idx2])
+                features.append(interactionFeature)
+
     if numFeatures > 4:
         ranges = currentFeatures[:, 1] - currentFeatures[:, 2]
         features.append(ranges.reshape(-1, 1))
@@ -146,38 +167,38 @@ def directionalFeatures(self, cfg: DictConfig, xTensor):
     return finalFeatures
 
 def directionalClassifiers(self, cfg: DictConfig):
-    self.directinalClassifiers = {
+    self.directionalClassifiers = {
         'gradientBoosting': GradientBoostingClassifier(
-            numEstimators = cfg.classifiers.numEstimators[0],
-            learningRate = cfg.classifiers.learningRate,
-            maxDepth = cfg.classifiers.maxDepth[0],
+            n_estimators = cfg.classifiers.numEstimators[0],
+            learning_rate = cfg.classifiers.learningRate,
+            max_depth = cfg.classifiers.maxDepth[0],
             subsample = cfg.classifiers.subSample,
-            minSamplesSplit = cfg.classifiers.minSamplesSplit[0],
-            minSamplesLeaf = cfg.classifiers.minSamplesLeaf[0],
-            randomState = cfg.classifiers.randomState
+            min_samples_split = cfg.classifiers.minSamplesSplit[0],
+            min_samples_leaf = cfg.classifiers.minSamplesLeaf[0],
+            random_state = cfg.classifiers.randomState
             ),
         'randomForest': RandomForestClassifier(
-            numEstimators = cfg.classifiers.numEstimators[1],
-            maxDepth = cfg.classifiers.maxDepth[1],
-            minSamplesSplit = cfg.classifiers.minSamplesSplit[1],
-            minSamplesLeaf = cfg.classifiers.minSamplesLeaf[1],
-            maxFeatures = cfg.classifiers.maxFeatures,
-            classWeight = cfg.classifiers.classWeight,
-            randomState = cfg.classifiers.randomState
+            n_estimators = cfg.classifiers.numEstimators[1],
+            max_depth = cfg.classifiers.maxDepth[1],
+            min_samples_split = cfg.classifiers.minSamplesSplit[1],
+            min_samples_leaf = cfg.classifiers.minSamplesLeaf[1],
+            max_features = cfg.classifiers.maxFeatures,
+            class_weight = cfg.classifiers.classWeight,
+            random_state = cfg.classifiers.randomState
             ),
         'logisticRegression': LogisticRegression(
             C = cfg.classifiers.C[0],
             solver = cfg.classifiers.solver,
-            classWeight = cfg.classifiers.classWeight,
-            maxIter = cfg.classifiers.maxIterations,
-            randomState = cfg.classifiers.randomState
+            class_weight = cfg.classifiers.classWeight,
+            max_iter = cfg.classifiers.maxIterations,
+            random_state = cfg.classifiers.randomState
         ),
         'svm': SVC(
             C = cfg.classifiers.C[1],
             kernel = cfg.classifiers.kernel,
             probability = cfg.classifiers.probability,
-            classWeight = cfg.classifiers.classWeight,
-            randomState = cfg.classifiers.randomState
+            class_weight = cfg.classifiers.classWeight,
+            random_state = cfg.classifiers.randomState
         )
     }
     self.voting_classifier = VotingClassifier(
