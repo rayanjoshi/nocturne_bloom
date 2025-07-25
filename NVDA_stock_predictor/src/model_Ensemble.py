@@ -63,7 +63,7 @@ class magnitudeEnsemble(nn.Module):
         if self.ridgeFitted:
             x_flat = x.view(x.size(0), -1).detach().numpy()
             ridgePredictions = torch.tensor(self.ridge.predict(x_flat), dtype=torch.float32)
-
+            
             finalPredictions = cfg.model.cnnWeight * cnnPredictions + cfg.model.ridgeWeight * ridgePredictions
             return finalPredictions
         else:
@@ -72,6 +72,76 @@ class magnitudeEnsemble(nn.Module):
         xFlat = x.view(x.size(0), -1).detach().numpy()
         self.ridge.fit(xFlat, y.detach().numpy())
         self.ridgeFitted = True
+
+def directionalFeatures(self, cfg: DictConfig, xTensor):
+    batchSize, numFeatures, sequenceLength = xTensor.shape
+    features = []
+    currentFeatures = xTensor[:, -1,:].numpy()
+    features.append(currentFeatures)
+    
+    if sequenceLength >= 2:
+        shortMomentum = (xTensor[:, -1, :] - xTensor[:, -2, :]).numpy()
+        features.append(shortMomentum)
+    
+    if sequenceLength >= 3:
+        medMomentum = (xTensor[:, -1, :] - xTensor[:, -3, :]).numpy()
+        features.append(medMomentum)
+    
+    if sequenceLength >= 5:
+        longMomentum = (xTensor[:, -1, :] - xTensor[:, -5, :]).numpy()
+        features.append(longMomentum)
+    
+    if sequenceLength >= 3:
+        recentVolatility = torch.std(xTensor[:, -3:, :], dim=1).numpy()
+        features.append(recentVolatility)
+    
+    if sequenceLength >= 5:
+        mediumVolatility = torch.std(xTensor[:, -5:, :], dim=1).numpy()
+        features.append(mediumVolatility)
+    
+    fullVolatility = torch.std(xTensor, dim=1).numpy()
+    features.append(fullVolatility)
+    
+    skewnessFeature = []
+    for i in range(batchSize):
+        sampleData = xTensor[i, :, :].numpy()
+        meanValue = np.mean(sampleData, axis=1)
+        stdDev = np.std(sampleData, axis=1)
+        skewnessValue = torch.mean(((sampleData - meanValue) / stdDev) ** 3, dim=0)
+    skewnessFeature.append(skewnessValue.numpy())
+    features.append(np.array(skewnessFeature))
+    
+    trendFeature =[]
+    for i in range(numFeatures):
+        for j in range(batchSize):
+            xValues = np.arange(sequenceLength)
+            yValues = xTensor[j, :, i].numpy()
+            if len(np.unique(yValues)) > 1:
+                trend = np.corrcoef(xValues, yValues)[0, 1]
+            else:
+                trend = 0.0
+                trendFeature.append(trend)
+        trends.append(trendFeature)
+    trends = np.array(trends).T
+    features.append(trends)
+    
+    topFeatures_idx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    
+    for i in range(len(topFeatures_idx)):
+        for j in range(i+1, min(i+4, len(topFeatures_idx))):
+            idx1, idx2 = topFeatures_idx[i], topFeatures_idx[j]
+            interactionFeature = (features[idx1] * features[idx2])
+            features.append(interactionFeature.reshape(-1, 1))
+    
+    if numFeatures > 4:
+        ranges = currentFeatures[:, 1] - currentFeatures[:, 2]
+        features.append(ranges.reshape(-1, 1))
+        
+        bodySize = np.abs(currentFeatures[:, 3] - currentFeatures[:, 0])
+        features.append(bodySize.reshape(-1, 1))
+    
+    finalFeatures = np.concatenate(features, axis=1)
+    return finalFeatures
 
 """
 class ensembleModule(L.LightningModule):
