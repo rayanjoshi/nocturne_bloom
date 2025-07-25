@@ -3,8 +3,6 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, ADXIndicator, MassIndex, AroonIndicator, CCIIndicator
 from ta.volatility import BollingerBands, AverageTrueRange, UlcerIndex
 from ta.volume import OnBalanceVolumeIndicator, ChaikinMoneyFlowIndicator, ForceIndexIndicator, NegativeVolumeIndexIndicator
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
-import joblib
 from pathlib import Path
 import hydra
 from omegaconf import DictConfig
@@ -92,36 +90,15 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     # Drop rows with NaN values
     dataFrame.dropna(inplace=True)
 
-    # Scale features
-    temporalScaler = MinMaxScaler()
-    staticScaler = StandardScaler()
-    # Include all relevant columns for scaling
-    temporalIndicatorCols = cfg.features.temporal_indicator_cols + ['Open', 'High', 'Low', 'Close', 'Volume']
-    staticIndicatorCols = cfg.features.static_indicator_cols
-
-    # Scale the features and assign them back individually
-    scaledTemporalData = temporalScaler.fit_transform(dataFrame[temporalIndicatorCols])
-    for i, col in enumerate(temporalIndicatorCols):
-        dataFrame[col] = scaledTemporalData[:, i]
-    
-    scaledStaticData = staticScaler.fit_transform(dataFrame[staticIndicatorCols])
-    for i, col in enumerate(staticIndicatorCols):
-        dataFrame[col] = scaledStaticData[:, i]
+    # No scaling here - will be done in data_module.py after temporal split
+    print("Feature engineering complete - no scaling applied")
+    print("Scaling will be performed in data_module.py after train/val split to avoid data leakage")
 
     # Convert relative paths to absolute paths within the repository
     script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
     repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
     
-    temporalScalerPath = repo_root / cfg.features.TEMPORAL_SCALER_PATH.lstrip('../')
-    staticScalerPath = repo_root / cfg.features.STATIC_SCALER_PATH.lstrip('../')
     preprocessing_data_path = repo_root / cfg.features.preprocessing_data_path.lstrip('../')
-
-    # Save the scalers for future use
-    temporalScalerPath.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(temporalScaler, temporalScalerPath)
-
-    staticScalerPath.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(staticScaler, staticScalerPath)
 
     # Save processed data
     preprocessing_data_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,9 +107,8 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     print(f"Processed data saved to {preprocessing_data_path.absolute()}")
     print("--------- Feature Engineering Statistics ---------")
     print(f"Total features created: {len(dataFrame.columns)}")
-    print(f"Features scaled: {len(temporalIndicatorCols) + len(staticIndicatorCols)}")
     print(f"Dataset shape: {dataFrame.shape}")
-    print(f"Scaled features: {temporalIndicatorCols + staticIndicatorCols}")
+    print(f"Features will be scaled in data_module.py after train/val split")
     print(f"All features: {list(dataFrame.columns)}")
     print("--------- Feature Engineering Completed ---------")
 
