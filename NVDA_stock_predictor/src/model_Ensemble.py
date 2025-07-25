@@ -35,90 +35,8 @@ class CNNFeatureExtractor(nn.Module):
         x = self.CNN(x)
         return x
 
-class LSTMPredictor(nn.Module):
-    def __init__(self, cfg: DictConfig):
-        super().__init__()
-        input_size = cfg.LSTMPredictor.input_size
-        hidden_size = cfg.LSTMPredictor.hidden_size
-        num_layers = cfg.LSTMPredictor.num_layers
-        bidirectional = cfg.LSTMPredictor.bidirectional
-        dropout = cfg.LSTMPredictor.dropout
-        output_size = cfg.LSTMPredictor.output_size
-        batch_first = cfg.LSTMPredictor.batch_first
-        
-        self.lstm_layers = nn.ModuleList()
-        self.layer_norms = nn.ModuleList()
-        self.dropouts = nn.ModuleList()
-        
-        for i in range(num_layers):
-            layer_input_size = input_size if i == 0 else hidden_size * (2 if bidirectional else 1)
-            
-            lstm_layer = nn.LSTM(
-                layer_input_size, 
-                hidden_size, 
-                num_layers=1, 
-                bidirectional=bidirectional, 
-                dropout=0.0, 
-                batch_first=batch_first
-            )
-            self.lstm_layers.append(lstm_layer)
-            self.layer_norms.append(nn.LayerNorm(hidden_size * (2 if bidirectional else 1)))
-            self.dropouts.append(nn.Dropout(dropout if num_layers > 1 else 0.0))
-        
-        final_hidden_size = hidden_size * (2 if bidirectional else 1)
-        self.fc_layers = nn.Sequential(
-            nn.Linear(final_hidden_size, final_hidden_size // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(final_hidden_size // 2, final_hidden_size // 4),   
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(final_hidden_size // 4, output_size)            
-            )
-
-    def forward(self, x):
-        for i, (lstm_layer, layer_norm, dropout) in enumerate(zip(self.lstm_layers, self.layer_norms, self.dropouts)):
-            lstm_out, (h_n, c_n) = lstm_layer(x)
-            
-            # Apply layer normalization and dropout (except for last layer)
-            if i < len(self.lstm_layers) - 1:
-                lstm_out = layer_norm(lstm_out)
-                lstm_out = dropout(lstm_out)
-                x = lstm_out
-            else:
-                # For the last layer, take only the final time step
-                x = lstm_out[:, -1, :]
-        
-        # Final prediction layers
-        x = self.fc_layers(x)
-
-
-        return x
-
-class CNNLSTMModel(nn.Module):
-    def __init__(self, cfg):
-        super().__init__()
-        self.cnn = CNNFeatureExtractor(cfg)
-        self.lstm = LSTMPredictor(cfg)
-        
-        self.adaptive_pool = nn.AdaptiveAvgPool1d(cfg.model.target_sequence_length)
-
-    def forward(self, x):
-        # Input shape: [batch_size, seq_len, features] = [batch_size, 10, 40]
-        # For CNN: transpose to [batch_size, features, seq_len] = [batch_size, 40, 10]
-        
-        x = x.permute(0, 2, 1)  # [batch_size, 40, 10] - treat features as input channels
-        
-        cnn_out = self.cnn(x)  # [batch_size, 64, reduced_seq_len]
-        #cnn_out = self.adaptive_pool(cnn_out)  # [batch_size, 64, target_sequence_length]
-        
-        # Prepare for LSTM: [batch_size, seq_len, features]
-        lstm_in = cnn_out.permute(0, 2, 1)  # [batch_size, reduced_seq_len, 64]
-        
-        output = self.lstm(lstm_in)         
-        return output
-
-class CNNLSTMModule(L.LightningModule):
+""""
+class ensembleModule(L.LightningModule):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
@@ -219,3 +137,5 @@ class CNNLSTMModule(L.LightningModule):
                 'lr_scheduler': scheduler,
                 'monitor': 'val_loss'
             }
+            
+"""
