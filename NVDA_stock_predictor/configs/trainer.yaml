@@ -11,7 +11,9 @@ trainer:
   devices: 1
   log_every_n_steps: 10
   seed: 1
+  early_stopping_patience: 20  # Stop if no improvement for 20 epochs
+  early_stopping_delta: 0.001  # Minimum change to qualify as improvement
 
 optimizer:
-  lr: 0.0001
-  weight_decay: 1e-5
+  lr: 0.0005  # Slightly higher learning rate to escape local minima
+  weight_decay: 1e-4  # Increased regularization
