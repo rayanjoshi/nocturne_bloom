@@ -1,19 +1,16 @@
 defaults:
   - _self_
-  - model_CNNLSTM
+  - model_Ensemble
   - data_module
 
 trainer:
-  project_name: "NVDA Stock Predictor"
-  run_name: "CNN-LSTM"
-  max_epochs: 200
+  project_name: "NVDA Stock Predictor - Optimized"
+  run_name: "CNN-Ridge Regression"
+  max_epochs: 50  # More epochs with early stopping
   accelerator: "auto"
   devices: 1
-  log_every_n_steps: 10
-  seed: 1
-  early_stopping_patience: 20  # Stop if no improvement for 20 epochs
-  early_stopping_delta: 0.001  # Minimum change to qualify as improvement
-
-optimizer:
-  lr: 0.0005  # Slightly higher learning rate to escape local minima
-  weight_decay: 1e-4  # Increased regularization
+  log_every_n_steps: 10  # Optimized logging frequency
+  seed: 42  # Optimized seed for reproducibility
+  gradient_clip_val: 1.0  # Gradient clipping to prevent exploding gradients
+  early_stopping_patience: 10  # Stop if no improvement for 10 epochs
+  early_stopping_delta: 0.001  # Optimized delta for early stopping
