@@ -2,7 +2,6 @@ from .backtest import *
 from .data_loader import load_data
 from .feature_engineering import feature_engineering
 from .data_module import StockDataModule
-from .model_baseline import *
 from .model_Ensemble import *
 from .utils import *
 
