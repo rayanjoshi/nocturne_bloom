@@ -10,7 +10,7 @@ from omegaconf import DictConfig, OmegaConf
 
 checkpoint_callback = ModelCheckpoint(
     monitor="val_r2",
-    dirpath="../logs",
+    dirpath="../models",
     filename="model-{epoch:02d}-{val_r2:.2f}",
     save_top_k=3,
     mode="max",
