@@ -3,3 +3,4 @@ defaults:
   - feature_engineering: feature_engineering
   - trainer: trainer
   - backtest: backtest
+  - model_Ensemble: model_Ensemble
