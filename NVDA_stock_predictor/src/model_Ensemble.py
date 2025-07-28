@@ -1,13 +1,14 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torchmetrics import MeanAbsoluteError, MeanSquaredError
+import skorch
+from skorch import NeuralNetClassifier
+from torchmetrics import MeanAbsoluteError, MeanSquaredError, Accuracy
 from torchmetrics.regression import R2Score
-from sklearn.linear_model import Ridge, LogisticRegression
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.svm import SVC
-from sklearn.ensemble import VotingClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 import lightning as L
 from omegaconf import DictConfig
 class CNN(nn.Module):
@@ -151,59 +152,209 @@ class RidgeRegressor(nn.Module):
         return predictions
 
 
+class SklearnWrapper(nn.Module):
+    """Simple wrapper to make sklearn estimators work with skorch"""
+    def __init__(self, estimator):
+        super().__init__()
+        self.estimator = estimator
+        
+    def forward(self, x):
+        # This won't be used, but required for nn.Module
+        return x
+
+
 class DirectionalClassifier(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
-        self.directionalClassifiers = {}
-        self.voting_classifier = None
-        self.featureScaler = StandardScaler()
-        self.directionalThreshold = 0.5
+        self.cfg = cfg
+        self.device = None
+        self.is_fitted = False
         
-        # Initialize classifiers based on config
-        self.directionalClassifiers(cfg)    
-    def directionalClassifiers(self, cfg: DictConfig):
-        self.directionalClassifiers = {
-            'gradientBoosting': GradientBoostingClassifier(
-                n_estimators = cfg.classifiers.numEstimators[0],
-                learning_rate = cfg.classifiers.learningRate,
-                max_depth = cfg.classifiers.maxDepth[0],
-                subsample = cfg.classifiers.subSample,
-                min_samples_split = cfg.classifiers.minSamplesSplit[0],
-                min_samples_leaf = cfg.classifiers.minSamplesLeaf[0],
-                random_state = cfg.classifiers.randomState
-                ),
-            'randomForest': RandomForestClassifier(
-                n_estimators = cfg.classifiers.numEstimators[1],
-                max_depth = cfg.classifiers.maxDepth[1],
-                min_samples_split = cfg.classifiers.minSamplesSplit[1],
-                min_samples_leaf = cfg.classifiers.minSamplesLeaf[1],
-                max_features = cfg.classifiers.maxFeatures,
-                class_weight = cfg.classifiers.classWeight,
-                random_state = cfg.classifiers.randomState
-                ),
-            'logisticRegression': LogisticRegression(
-                C = cfg.classifiers.C[0],
-                solver = cfg.classifiers.solver,
-                class_weight = cfg.classifiers.classWeight,
-                max_iter = cfg.classifiers.maxIterations,
-                random_state = cfg.classifiers.randomState
-            ),
-            'svm': SVC(
-                C = cfg.classifiers.C[1],
-                kernel = cfg.classifiers.kernel,
-                probability = cfg.classifiers.probability,
-                class_weight = cfg.classifiers.classWeight,
-                random_state = cfg.classifiers.randomState
-            )
-        }
-        self.voting_classifier = VotingClassifier(
-        estimators=list(self.directionalClassifiers.items()),
-        voting='soft',
-        weights=[0.3, 0.3, 0.2, 0.2]  # Optimized weights
+        gb_estimator = GradientBoostingClassifier(
+            n_estimators=cfg.classifiers.numEstimators[0],
+            learning_rate=cfg.classifiers.learningRate,
+            max_depth=cfg.classifiers.maxDepth[0],
+            subsample=cfg.classifiers.subSample,
+            min_samples_split=cfg.classifiers.minSamplesSplit[0],
+            min_samples_leaf=cfg.classifiers.minSamplesLeaf[0],
+            random_state=cfg.classifiers.randomState
         )
         
-        self.featureScaler = StandardScaler()
-        self.directionalThreshold = 0.5
+        svm_estimator = SVC(
+            C=cfg.classifiers.C[1],
+            kernel=cfg.classifiers.kernel,
+            probability=cfg.classifiers.probability,
+            class_weight=cfg.classifiers.classWeight,
+            random_state=cfg.classifiers.randomState
+        )
+        
+        logistic_estimator = LogisticRegression(
+            C=cfg.classifiers.C[0],
+            solver=cfg.classifiers.solver,
+            class_weight=cfg.classifiers.classWeight,
+            max_iter=cfg.classifiers.maxIterations,
+            random_state=cfg.classifiers.randomState
+        )
+        
+        rf_estimator = RandomForestClassifier(
+            n_estimators=cfg.classifiers.numEstimators[1],
+            max_depth=cfg.classifiers.maxDepth[1],
+            min_samples_split=cfg.classifiers.minSamplesSplit[1],
+            min_samples_leaf=cfg.classifiers.minSamplesLeaf[1],
+            max_features=cfg.classifiers.maxFeatures,
+            class_weight=cfg.classifiers.classWeight,
+            random_state=cfg.classifiers.randomState
+        )
+        
+        # Wrap with skorch for tensor compatibility
+        self.gb_classifier = NeuralNetClassifier(
+            SklearnWrapper,
+            module__estimator=gb_estimator,
+            train_split=None,
+            verbose=0,
+            max_epochs=1,
+        )
+        
+        self.svm_classifier = NeuralNetClassifier(
+            SklearnWrapper,
+            module__estimator=svm_estimator,
+            train_split=None,
+            verbose=0,
+            max_epochs=1,
+        )
+        
+        self.logistic_classifier = NeuralNetClassifier(
+            SklearnWrapper,
+            module__estimator=logistic_estimator,
+            train_split=None,
+            verbose=0,
+            max_epochs=1,
+        )
+        
+        self.random_forest = NeuralNetClassifier(
+            SklearnWrapper,
+            module__estimator=rf_estimator,
+            train_split=None,
+            verbose=0,
+            max_epochs=1,
+        )
+        
+        # Store estimators for direct access
+        self.gb_est = gb_estimator
+        self.svm_est = svm_estimator
+        self.logistic_est = logistic_estimator
+        self.rf_est = rf_estimator
+        
+        # Ensemble weights (4 models: GB, RF, Logistic, SVM)
+        self.gb_weight = 0.3
+        self.rf_weight = 0.3
+        self.logistic_weight = 0.2
+        self.svm_weight = 0.2
+    
+    def fit(self, X, y):
+        """
+        Fit all classifiers (staying in tensor space as much as possible)
+        
+        Args:
+            X: Features (torch.Tensor) - already scaled
+            y: Target labels (torch.Tensor) 
+        """
+        self.device = X.device
+        
+        # Flatten if 3D
+        if len(X.shape) == 3:
+            X_flat = X.view(X.shape[0], -1)
+        else:
+            X_flat = X
+        
+        # Only convert to numpy when needed for sklearn estimators
+        X_numpy = X_flat.cpu().detach().numpy()
+        y_numpy = y.cpu().detach().numpy()
+        
+        # Fit sklearn estimators directly
+        print("Fitting Gradient Boosting classifier...")
+        self.gb_est.fit(X_numpy, y_numpy)
+        
+        # Fit sklearn estimators directly (more reliable than skorch wrapper for this use case)
+        print("Fitting Gradient Boosting classifier...")
+        self.gb_est.fit(X_numpy, y_numpy)
+        
+        print("Fitting SVM classifier...")
+        self.svm_est.fit(X_numpy, y_numpy)
+        
+        print("Fitting Logistic Regression classifier...")
+        self.logistic_est.fit(X_numpy, y_numpy)
+        
+        print("Fitting Random Forest classifier...")
+        self.rf_est.fit(X_numpy, y_numpy)
+        
+        self.is_fitted = True
+        return self
+    
+    def predict_proba(self, X):
+        """
+        Predict class probabilities using ensemble (return tensors)
+        
+        Args:
+            X: Features (torch.Tensor) - already scaled
+            
+        Returns:
+            Ensemble probabilities as torch.Tensor
+        """
+        if not self.is_fitted:
+            raise RuntimeError("DirectionalClassifier must be fitted before prediction")
+        
+        # Flatten if 3D
+        if len(X.shape) == 3:
+            X_flat = X.view(X.shape[0], -1)
+        else:
+            X_flat = X
+        
+        # Convert to numpy for sklearn prediction
+        X_numpy = X_flat.cpu().detach().numpy()
+        
+        # Get probabilities and convert to tensors
+        gb_proba = torch.tensor(self.gb_est.predict_proba(X_numpy), device=X.device, dtype=torch.float32)
+        svm_proba = torch.tensor(self.svm_est.predict_proba(X_numpy), device=X.device, dtype=torch.float32)
+        logistic_proba = torch.tensor(self.logistic_est.predict_proba(X_numpy), device=X.device, dtype=torch.float32)
+        rf_proba = torch.tensor(self.rf_est.predict_proba(X_numpy), device=X.device, dtype=torch.float32)
+        
+        # Ensemble probabilities (4-model ensemble: GB 30%, RF 30%, Logistic 20%, SVM 20%)
+        ensemble_proba = (self.gb_weight * gb_proba + 
+                         self.rf_weight * rf_proba +
+                         self.logistic_weight * logistic_proba + 
+                         self.svm_weight * svm_proba)
+        
+        return ensemble_proba
+    
+    def predict(self, X):
+        """
+        Predict classes using ensemble
+        
+        Args:
+            X: Features (torch.Tensor)
+            
+        Returns:
+            Predictions as torch.Tensor
+        """
+        proba = self.predict_proba(X)
+        if isinstance(proba, torch.Tensor):
+            return torch.argmax(proba, dim=1)
+        else:
+            return proba.argmax(axis=1)
+    
+    def forward(self, x):
+        """
+        Forward pass for PyTorch compatibility
+        
+        Args:
+            x: Input tensor
+            
+        Returns:
+            Predictions as torch.Tensor
+        """
+        return self.predict_proba(x)
+
 
 
 class EnsembleModule(L.LightningModule):
@@ -222,6 +373,9 @@ class EnsembleModule(L.LightningModule):
         # Ridge component as nn.Module
         self.ridge = RidgeRegressor(cfg)
         
+        # Directional classifier component
+        self.direction_classifier = DirectionalClassifier(cfg)
+        
         # Ensemble weights (optimized from your champion model)
         self.cnn_weight = getattr(cfg.model, 'cnn_weight', 0.1)  # 10% CNN
         self.ridge_weight = getattr(cfg.model, 'ridge_weight', 0.9)  # 90% Ridge
@@ -237,13 +391,18 @@ class EnsembleModule(L.LightningModule):
         self.rmse_val = MeanSquaredError()
         self.r2_val = R2Score()
         
-        # Flag to track if Ridge has been fitted
+        # Directional accuracy metrics
+        self.direction_accuracy_train = Accuracy(task='binary')
+        self.direction_accuracy_val = Accuracy(task='binary')
+        
+        # Flags to track if models have been fitted
         self.ridge_fitted = False
+        self.direction_fitted = False
     
     def on_train_start(self):
-        """Fit Ridge regressor on all training data at the start of training"""
-        if not self.ridge_fitted:
-            print("Fitting Ridge regressor on all training data...")
+        """Fit Ridge regressor and DirectionalClassifier on all training data at the start of training"""
+        if not self.ridge_fitted or not self.direction_fitted:
+            print("Fitting Ridge regressor and DirectionalClassifier on all training data...")
             
             # Collect all training data
             all_x = []
@@ -271,8 +430,14 @@ class EnsembleModule(L.LightningModule):
             y_train = torch.cat(all_y, dim=0)
             
             # Fit Ridge
-            self.fit_ridge_on_batch(X_train, y_train)
-            print(f"Ridge regressor fitted on {len(y_train)} samples!")
+            if not self.ridge_fitted:
+                self.fit_ridge_on_batch(X_train, y_train)
+                print(f"Ridge regressor fitted on {len(y_train)} samples!")
+            
+            # Fit DirectionalClassifier
+            if not self.direction_fitted:
+                self.fit_direction_on_batch(X_train, y_train)
+                print(f"DirectionalClassifier fitted on {len(y_train)} samples!")
             
             # Clear memory
             del all_x, all_y, X_train, y_train
@@ -288,6 +453,15 @@ class EnsembleModule(L.LightningModule):
         """
         self.ridge.fit(X, y)
         self.ridge_fitted = True
+    
+    def fit_direction_on_batch(self, x, y):
+        """Fit DirectionalClassifier on a batch of data with binary direction targets"""
+        # Keep as tensors - create binary direction targets (1 for positive, 0 for negative/zero)
+        y_direction = (y > 0).int()
+        
+        # Fit the DirectionalClassifier with tensors
+        self.direction_classifier.fit(x, y_direction)
+        self.direction_fitted = True
     
     def forward(self, x):
         """
@@ -341,10 +515,21 @@ class EnsembleModule(L.LightningModule):
         
         loss = self.criterion(y_hat, y)
         
-        # Update metrics
+        # Update regression metrics
         self.mae_train.update(y_hat, y)
         self.rmse_train.update(y_hat, y)
         self.r2_train.update(y_hat, y)
+        
+        # Update direction accuracy if direction classifier is fitted
+        if self.direction_fitted:
+            # Get direction predictions (staying in tensor space)
+            direction_pred = self.direction_classifier.predict(x)
+            
+            # Get true direction (1 for positive, 0 for negative/zero)
+            direction_true = (y > 0).int()
+            
+            # Update direction accuracy
+            self.direction_accuracy_train.update(direction_pred, direction_true)
         
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
@@ -356,9 +541,21 @@ class EnsembleModule(L.LightningModule):
             y_hat = y_hat.view_as(y)
         loss = self.criterion(y_hat, y)
         
+        # Update regression metrics
         self.mae_val.update(y_hat, y)
         self.rmse_val.update(y_hat, y)
         self.r2_val.update(y_hat, y)
+        
+        # Update direction accuracy if direction classifier is fitted
+        if self.direction_fitted:
+            # Get direction predictions (staying in tensor space)
+            direction_pred = self.direction_classifier.predict(x)
+            
+            # Get true direction (1 for positive, 0 for negative/zero)
+            direction_true = (y > 0).int()
+            
+            # Update direction accuracy
+            self.direction_accuracy_val.update(direction_pred, direction_true)
         
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
         return loss
@@ -367,42 +564,51 @@ class EnsembleModule(L.LightningModule):
         avg_mae = self.mae_train.compute()
         avg_rmse = torch.sqrt(self.rmse_train.compute())
         avg_r2 = self.r2_train.compute()
+        avg_direction_acc = self.direction_accuracy_train.compute()
         
         self.log('train_mae', avg_mae, prog_bar=True)
         self.log('train_rmse', avg_rmse, prog_bar=True)
         self.log('train_r2', avg_r2, prog_bar=True)
+        self.log('train_direction_acc', avg_direction_acc, prog_bar=True)
         
         print(f"\n --------- Training Results ---------")
         print(f"MAE: {avg_mae:.4f}")
         print(f"RMSE: {avg_rmse:.4f}")
         print(f"R2: {avg_r2:.4f}")
+        print(f"Direction Accuracy: {avg_direction_acc:.4f}")
         print(f"Ridge Fitted: {self.ridge_fitted}")
+        print(f"Direction Fitted: {self.direction_fitted}")
         print(f"--------- Training Complete ---------\n")
         
         # Reset metrics for next epoch
         self.mae_train.reset()
         self.rmse_train.reset()
         self.r2_train.reset()
+        self.direction_accuracy_train.reset()
         
     def on_validation_epoch_end(self):
         avg_mae = self.mae_val.compute()
         avg_rmse = torch.sqrt(self.rmse_val.compute())
         avg_r2 = self.r2_val.compute()
+        avg_direction_acc = self.direction_accuracy_val.compute()
         
         self.log('val_mae', avg_mae, prog_bar=True)
         self.log('val_rmse', avg_rmse, prog_bar=True)
         self.log('val_r2', avg_r2, prog_bar=True)
+        self.log('val_direction_acc', avg_direction_acc, prog_bar=True)
         
         print(f"\n --------- Validation Results ---------")
         print(f"MAE: {avg_mae:.4f}")
         print(f"RMSE: {avg_rmse:.4f}")
         print(f"R2: {avg_r2:.4f}")
+        print(f"Direction Accuracy: {avg_direction_acc:.4f}")
         print(f"--------- Validation Complete ---------\n")
         
         # Reset metrics for next epoch
         self.mae_val.reset()
         self.rmse_val.reset()
         self.r2_val.reset()
+        self.direction_accuracy_val.reset()
     
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
