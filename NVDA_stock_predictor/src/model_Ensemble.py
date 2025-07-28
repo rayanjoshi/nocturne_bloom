@@ -275,10 +275,6 @@ class DirectionalClassifier(nn.Module):
         print("Fitting Gradient Boosting classifier...")
         self.gb_est.fit(X_numpy, y_numpy)
         
-        # Fit sklearn estimators directly (more reliable than skorch wrapper for this use case)
-        print("Fitting Gradient Boosting classifier...")
-        self.gb_est.fit(X_numpy, y_numpy)
-        
         print("Fitting SVM classifier...")
         self.svm_est.fit(X_numpy, y_numpy)
         
@@ -456,8 +452,18 @@ class EnsembleModule(L.LightningModule):
     
     def fit_direction_on_batch(self, x, y):
         """Fit DirectionalClassifier on a batch of data with binary direction targets"""
-        # Keep as tensors - create binary direction targets (1 for positive, 0 for negative/zero)
-        y_direction = (y > 0).int()
+        # CRITICAL FIX: Compute price changes instead of using absolute prices
+        # Since y contains predicted prices, we need to compute day-to-day changes
+        # Shift y to get previous day's price and compute change
+        y_prev = torch.cat([y[:1], y[:-1]])  # Shift by 1, duplicate first element
+        y_change = y - y_prev  # Current price - previous price
+        
+        # Create binary direction targets based on price CHANGES (1 for up, 0 for down/flat)
+        y_direction = (y_change > 0).int()
+        
+        print(f"Direction targets - Positive changes: {(y_change > 0).sum()}/{len(y_change)} ({(y_change > 0).float().mean()*100:.1f}%)")
+        print(f"Direction targets - Negative changes: {(y_change < 0).sum()}/{len(y_change)} ({(y_change < 0).float().mean()*100:.1f}%)")
+        print(f"Direction targets - Zero changes: {(y_change == 0).sum()}/{len(y_change)} ({(y_change == 0).float().mean()*100:.1f}%)")
         
         # Fit the DirectionalClassifier with tensors
         self.direction_classifier.fit(x, y_direction)
@@ -525,8 +531,10 @@ class EnsembleModule(L.LightningModule):
             # Get direction predictions (staying in tensor space)
             direction_pred = self.direction_classifier.predict(x)
             
-            # Get true direction (1 for positive, 0 for negative/zero)
-            direction_true = (y > 0).int()
+            # CRITICAL FIX: Compute actual price changes for true direction
+            y_prev = torch.cat([y[:1], y[:-1]])  # Previous day's price
+            y_change = y - y_prev  # Price change
+            direction_true = (y_change > 0).int()  # 1 for up, 0 for down/flat
             
             # Update direction accuracy
             self.direction_accuracy_train.update(direction_pred, direction_true)
@@ -551,8 +559,10 @@ class EnsembleModule(L.LightningModule):
             # Get direction predictions (staying in tensor space)
             direction_pred = self.direction_classifier.predict(x)
             
-            # Get true direction (1 for positive, 0 for negative/zero)
-            direction_true = (y > 0).int()
+            # CRITICAL FIX: Compute actual price changes for true direction
+            y_prev = torch.cat([y[:1], y[:-1]])  # Previous day's price
+            y_change = y - y_prev  # Price change
+            direction_true = (y_change > 0).int()  # 1 for up, 0 for down/flat
             
             # Update direction accuracy
             self.direction_accuracy_val.update(direction_pred, direction_true)
