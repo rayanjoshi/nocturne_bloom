@@ -33,11 +33,22 @@ classifiers:
   maxIterations: 1000
   kernel: 'rbf'
   probability: True
+  verbose: 0
+  MAXEPOCHS: 1
+
+  GBWEIGHT: 0.3
+  RFWEIGHT: 0.3
+  LOGISTICWEIGHT: 0.2
+  SVMWEIGHT: 0.2 
 
 optimiser:
-  name: 'adam'  # Optimizer type, can be 'adam', 'sgd', etc.
-  lr: 0.001  # Learning rate for the optimizer
+  name: 'adam'
+  lr: 0.001 
   weightDecay: 0.0001  # L2 regularization term
-  betas: [0.9, 0.999]  # Betas for Adam optimizer
-  eps: 1e-08  # Epsilon for numerical stability in Adam
+  betas: [0.9, 0.999] 
+  eps: 1e-08 
   amsgrad: False  # Whether to use AMSGrad variant of Adam
+  schedulerMode: 'min'
+  schedulerFactor: 0.5 
+  schedulerPatience: 5 
+  schedulerMinLR: 1e-7 
