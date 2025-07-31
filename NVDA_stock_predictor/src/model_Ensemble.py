@@ -212,7 +212,7 @@ class DirectionalClassifier(nn.Module):
             module__estimator=GBEstimator,
             train_split=None,
             verbose=cfg.classifiers.verbose,
-            max_epochs=cfg.classifiers.maxEpochs,
+            max_epochs=cfg.classifiers.MAXEPOCHS,
         )
         
         self.svmClassifier = NeuralNetClassifier(
