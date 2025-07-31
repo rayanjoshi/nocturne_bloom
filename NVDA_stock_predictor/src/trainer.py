@@ -1,11 +1,12 @@
+import hydra
+import torch
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
-import hydra
-import torch
-import sys
-import os
 from omegaconf import DictConfig, OmegaConf
+
+from model_Ensemble import EnsembleModule
+from data_module import StockDataModule
 
 
 checkpoint_callback = ModelCheckpoint(
@@ -49,9 +50,6 @@ def main(cfg: DictConfig):
     )
     
     
-    from model_Ensemble import EnsembleModule
-    from data_module import StockDataModule
-
     model = EnsembleModule(cfg)
     data_module = StockDataModule(cfg)
 
