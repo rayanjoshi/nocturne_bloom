@@ -21,41 +21,29 @@ from data_module import StockDataModule
 def define_search_space_directional():
     """Define search space optimized for directional accuracy"""
     return {
-        # CNN Architecture
-        "cnn.cnnChannels": tune.choice([
-            [8, 16, 8],
-            [16, 32, 16], 
-            [32, 64, 32],
-            [16, 32, 64],
-            [8, 16, 32]
-        ]),
-        "cnn.kernelSize": tune.choice([
-            [2, 2, 2],
-            [3, 3, 2], 
-            [3, 3, 3],
-            [5, 3, 2],
-            [3, 5, 2]
-        ]),
-        "cnn.dropout": tune.choice([
-            [0.1, 0.2],
-            [0.2, 0.3],
-            [0.3, 0.4],
-            [0.3, 0.5],
-            [0.4, 0.6]
-        ]),
-        
-        # Model weights (focusing on directional accuracy)
-        "model.cnnWeight": tune.uniform(0.05, 0.3),
-        "model.ridgeWeight": tune.uniform(0.7, 0.95),
-        
-        # Ridge regularization
-        "Ridge.alpha": tune.loguniform(0.01, 10.0),
-        
-        # Optimizer settings
-        "optimiser.lr": tune.loguniform(1e-5, 1e-2),
-        "optimiser.weightDecay": tune.loguniform(1e-6, 1e-3),
-        "optimiser.schedulerFactor": tune.uniform(0.3, 0.8),
-        "optimiser.schedulerPatience": tune.choice([3, 5, 7, 10]),
+        # Classifier hyperparameters
+        # Number of estimators for tree-based models
+        # Number of estimators for GB and RF (list of two ints)
+        "classifiers.numEstimators": tune.choice([[100, 100], [200, 200], [300, 300], [400, 400], [500, 500]]),
+        # Learning rate for classifiers
+        "classifiers.learningRate": tune.loguniform(1e-5, 1e-2),
+        # Maximum tree depth
+        # Maximum tree depths for GB and RF (list of two ints)
+        "classifiers.maxDepth": tune.choice([[2, 2], [5, 5], [8, 8], [10, 10]]),
+        # Minimum samples to split an internal node
+        # Min samples split for GB and RF (list of two ints)
+        "classifiers.minSamplesSplit": tune.choice([[2, 2], [5, 5], [8, 8], [10, 10]]),
+        # Minimum samples per leaf
+        # Min samples leaf for GB and RF (list of two ints)
+        "classifiers.minSamplesLeaf": tune.choice([[1, 1], [2, 2], [5, 5], [10, 10]]),
+        # Subsampling ratio for tree-based models
+        "classifiers.subSample": tune.uniform(0.1, 0.9),
+        # Regularization parameter C for logistic/SVM
+        # Regularization C for Logistic (index 0) and SVM (index 1)
+        "classifiers.C": tune.choice([[0.1, 0.1], [0.5, 0.5], [1.0, 1.0], [5.0, 5.0], [10.0, 10.0]]),
+        # Maximum iterations for logistic regression / SVM
+        # Max iterations for LogisticRegression
+        "classifiers.maxIterations": tune.choice([100, 200, 500, 1000]),
         
         # Training settings
         "trainer.max_epochs": tune.choice([30, 50, 70]),
@@ -96,6 +84,22 @@ def define_search_space_r2():
             [0.5, 0.6]
         ]),
         
+        "cnn.poolSize": tune.choice([
+            [2, 2, 2],
+            [3, 3, 2],
+            [2, 3, 2],
+            [3, 2, 2],
+            [2, 2, 3]
+        ]),
+        
+        "cnn.poolPadding": tune.choice([
+            [0, 0, 0],
+            [1, 1, 0],
+            [1, 0, 1],
+            [0, 1, 1],
+            [1, 1, 1]
+        ]),
+        
         # Model weights (balanced for R2)
         "model.cnnWeight": tune.uniform(0.1, 0.5),
         "model.ridgeWeight": tune.uniform(0.5, 0.9),
@@ -105,14 +109,9 @@ def define_search_space_r2():
         "Ridge.alpha": tune.loguniform(0.001, 100.0),
         
         # Optimizer settings
+        "optimiser.name": tune.choice(["adam", "sgd"]),
         "optimiser.lr": tune.loguniform(1e-6, 1e-2),
         "optimiser.weightDecay": tune.loguniform(1e-7, 1e-2),
-        "optimiser.betas": tune.choice([
-            [0.9, 0.999],
-            [0.95, 0.999],
-            [0.9, 0.995],
-            [0.8, 0.999]
-        ]),
         "optimiser.schedulerFactor": tune.uniform(0.2, 0.7),
         "optimiser.schedulerPatience": tune.choice([3, 5, 7, 10, 15]),
         
@@ -121,34 +120,6 @@ def define_search_space_r2():
         "trainer.early_stopping_patience": tune.choice([10, 15, 20]),
         "trainer.early_stopping_delta": tune.loguniform(1e-6, 1e-2),
         "trainer.gradient_clip_val": tune.uniform(0.5, 2.0),
-        
-        # Classifier settings
-        "classifiers.numEstimators": tune.choice([
-            [100, 150],
-            [150, 200],
-            [200, 250],
-            [250, 300]
-        ]),
-        "classifiers.learningRate": tune.uniform(0.05, 0.15),
-        "classifiers.maxDepth": tune.choice([
-            [4, 6],
-            [6, 8],
-            [8, 10],
-            [6, 10]
-        ]),
-        "classifiers.minSamplesSplit": tune.choice([
-            [5, 8],
-            [8, 10],
-            [10, 15],
-            [8, 12]
-        ]),
-        "classifiers.subSample": tune.uniform(0.7, 0.95),
-        
-        # Ensemble weights
-        "classifiers.GBWEIGHT": tune.uniform(0.2, 0.5),
-        "classifiers.RFWEIGHT": tune.uniform(0.2, 0.5),
-        "classifiers.LOGISTICWEIGHT": tune.uniform(0.1, 0.4),
-        "classifiers.SVMWEIGHT": tune.uniform(0.1, 0.4),
     }
 
 
