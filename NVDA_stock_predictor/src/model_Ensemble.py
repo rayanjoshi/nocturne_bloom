@@ -171,17 +171,17 @@ class DirectionalClassifier(nn.Module):
         self.is_fitted = False
         
         GBEstimator = GradientBoostingClassifier(
-            n_estimators=cfg.classifiers.numEstimators[0],
+            n_estimators=cfg.classifiers.numEstimators,
             learning_rate=cfg.classifiers.learningRate,
-            max_depth=cfg.classifiers.maxDepth[0],
+            max_depth=cfg.classifiers.maxDepth,
             subsample=cfg.classifiers.subSample,
-            min_samples_split=cfg.classifiers.minSamplesSplit[0],
-            min_samples_leaf=cfg.classifiers.minSamplesLeaf[0],
+            min_samples_split=cfg.classifiers.minSamplesSplit,
+            min_samples_leaf=cfg.classifiers.minSamplesLeaf,
             random_state=cfg.classifiers.randomState
         )
         
         SVMEstimator = SVC(
-            C=cfg.classifiers.C[1],
+            C=cfg.classifiers.C,
             kernel=cfg.classifiers.kernel,
             probability=cfg.classifiers.probability,
             class_weight=cfg.classifiers.classWeight,
@@ -189,7 +189,7 @@ class DirectionalClassifier(nn.Module):
         )
         
         LogisticEstimator = LogisticRegression(
-            C=cfg.classifiers.C[0],
+            C=cfg.classifiers.C,
             solver=cfg.classifiers.solver,
             class_weight=cfg.classifiers.classWeight,
             max_iter=cfg.classifiers.maxIterations,
@@ -197,10 +197,10 @@ class DirectionalClassifier(nn.Module):
         )
         
         RFEstimator = RandomForestClassifier(
-            n_estimators=cfg.classifiers.numEstimators[1],
-            max_depth=cfg.classifiers.maxDepth[1],
-            min_samples_split=cfg.classifiers.minSamplesSplit[1],
-            min_samples_leaf=cfg.classifiers.minSamplesLeaf[1],
+            n_estimators=cfg.classifiers.numEstimators,
+            max_depth=cfg.classifiers.maxDepth,
+            min_samples_split=cfg.classifiers.minSamplesSplit,
+            min_samples_leaf=cfg.classifiers.minSamplesLeaf,
             max_features=cfg.classifiers.maxFeatures,
             class_weight=cfg.classifiers.classWeight,
             random_state=cfg.classifiers.randomState
