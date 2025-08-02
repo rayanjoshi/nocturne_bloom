@@ -616,6 +616,60 @@ class EnsembleModule(L.LightningModule):
         self.r2_val.reset()
         self.direction_accuracy_val.reset()
     
+    def test_step(self, batch, batch_idx):
+        """Test step for final evaluation"""
+        x, y = batch
+        y_hat = self(x).squeeze(-1)
+        if y_hat.dim() != y.dim():
+            y_hat = y_hat.view_as(y)
+        loss = self.criterion(y_hat, y)
+        
+        # Update test metrics (using validation metrics for simplicity)
+        self.mae_val.update(y_hat, y)
+        self.rmse_val.update(y_hat, y)
+        self.r2_val.update(y_hat, y)
+        
+        # Update direction accuracy if direction classifier is fitted
+        if self.direction_fitted:
+            # Get direction predictions
+            directionPrediction = self.direction_classifier.predict(x)
+            
+            # Compute actual price changes for true direction
+            yPrevious = torch.cat([y[:1], y[:-1]])  # Previous day's price
+            deltaY = y - yPrevious  # Price change
+            directionTrue = (deltaY > 0).int()  # 1 for up, 0 for down/flat
+
+            # Update direction accuracy
+            self.direction_accuracy_val.update(directionPrediction, directionTrue)
+
+        self.log('test_loss', loss, on_step=False, on_epoch=True)
+        return loss
+    
+    def on_test_epoch_end(self):
+        """Compute and log test metrics at the end of testing"""
+        avg_mae = self.mae_val.compute()
+        avg_rmse = torch.sqrt(self.rmse_val.compute())
+        avg_r2 = self.r2_val.compute()
+        avg_direction_acc = self.direction_accuracy_val.compute()
+        
+        self.log('test_mae', avg_mae)
+        self.log('test_rmse', avg_rmse)
+        self.log('test_r2', avg_r2)
+        self.log('test_direction_acc', avg_direction_acc)
+        
+        print(f"\n ============ TEST RESULTS ============")
+        print(f"Test MAE: {avg_mae:.6f}")
+        print(f"Test RMSE: {avg_rmse:.6f}")
+        print(f"Test R²: {avg_r2:.6f}")
+        print(f"Test Direction Accuracy: {avg_direction_acc:.6f}")
+        print(f"=====================================\n")
+        
+        # Reset metrics
+        self.mae_val.reset()
+        self.rmse_val.reset()
+        self.r2_val.reset()
+        self.direction_accuracy_val.reset()
+    
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(), 
