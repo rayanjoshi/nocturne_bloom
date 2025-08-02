@@ -1,54 +1,54 @@
 model:
   target_sequence_length: 1  # Predicting the next closing price
-  huber_delta: 0.5  # Delta for Huber loss, can be adjusted based on the dataset
-  cnnWeight: 0.1
-  ridgeWeight: 0.9
+  huber_delta: 0.42001535863611617  # Delta for Huber loss, can be adjusted based on the dataset
+  # non-normalized weighted averaging of CNN and Ridge regression outputs #
+  cnnWeight: 0.4077282314032411
+  ridgeWeight: 0.8981321236689797
 
 cnn:
   inputChannels: 40  # Number of features (RSI, MACD, etc.)
-  cnnChannels: [16, 32, 16]  # Reduced capacity to prevent overfitting
-  kernelSize: [3, 3, 2]
-  poolSize: [2, 2, 1]  # Pooling after each CNN layer
+  cnnChannels: [32, 64, 32]  # Reduced capacity to prevent overfitting
+  kernelSize: [5, 3, 2]
+  poolSize: [2, 2, 3]  # Pooling after each CNN layer
   poolPadding: [0,0,0]
   padding: [1, 1, 1]  # kernel_size // 2 for each dimension
   stride: 1
-  dropout: [0.3, 0.5]
+  dropout: [0.2, 0.3]
   outputSize: 1
 
 Ridge:
-  alpha: 1.0  # Regularization strength for Ridge regression, can be adjusted based on the dataset
+  alpha: 0.02766091107194421  # Regularization strength for Ridge regression, can be adjusted based on the dataset
 
 classifiers:
-  numEstimators: [200, 150]
-  learningRate: 0.08
-  maxDepth: [6, 8]
-  minSamplesSplit: [10, 8]
-  minSamplesLeaf: [4, 3]
-  subSample: 0.85
+  numEstimators: 100
+  learningRate: 2.5093821312798074e-05
+  maxDepth: 10
+  minSamplesSplit: 5
+  minSamplesLeaf: 10
+  subSample: 0.5155378717861159
   randomState: 42
   maxFeatures: 'sqrt'
   classWeight: 'balanced'
-  C: [0.5, 0.8]
+  C: 5
   solver: 'liblinear'
-  maxIterations: 1000
+  maxIterations: 500
   kernel: 'rbf'
   probability: True
   verbose: 0
   MAXEPOCHS: 1
 
-  GBWEIGHT: 0.3
-  RFWEIGHT: 0.3
-  LOGISTICWEIGHT: 0.2
-  SVMWEIGHT: 0.2 
+  GBWEIGHT: 0.27053738995027
+  RFWEIGHT: 0.3019947415106128
+  LOGISTICWEIGHT: 0.13929721635149966
+  SVMWEIGHT: 0.28089454454114704
 
 optimiser:
   name: 'adam'
-  lr: 0.001 
-  weightDecay: 0.0001  # L2 regularization term
-  betas: [0.9, 0.999] 
+  lr: 0.00018214688395543804
+  weightDecay: 2.3361411158742311e-07  # L2 regularization term 
   eps: 1e-08 
   amsgrad: False  # Whether to use AMSGrad variant of Adam
   schedulerMode: 'min'
-  schedulerFactor: 0.5 
-  schedulerPatience: 5 
+  schedulerFactor: 0.49702858354305074
+  schedulerPatience: 3
   schedulerMinLR: 1e-7 
