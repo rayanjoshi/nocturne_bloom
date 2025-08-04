@@ -8,6 +8,9 @@ data_loader:
   raw_data_path: data/raw/nvda_raw_evaluate_data.csv
   sql_save_path: /WRDS_query.sql
 
+features:
+  preprocessing_data_path: data/preprocessing/nvda_preprocessed_evaluate_data.csv
+
 backtest:
   lookback_window: 30
   initial_cash: 10000

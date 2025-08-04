@@ -5,6 +5,7 @@ import hydra
 from omegaconf import DictConfig
 
 from data_loader import load_data
+from feature_engineering import feature_engineering
 
 class DataProcessor:
     def __init__(self, cfg: DictConfig):
@@ -22,6 +23,21 @@ class DataProcessor:
             self.cfg.data_loader.END_DATE,
             self.cfg.data_loader.raw_data_path
         )
+    
+    def engineer_features(self):
+        print(f"Engineering features for {self.cfg.data_loader.TICKER}")
+        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
+        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
+        raw_data_path = repo_root / self.cfg.data_loader.raw_data_path.lstrip('../')
+        save_data_path = repo_root / self.cfg.features.preprocessing_data_path.lstrip('../')
+        dataFrame = pd.read_csv(
+            raw_data_path, 
+            header=0, 
+            index_col=0, 
+            parse_dates=True
+        )
+        feature_engineering(dataFrame, self.cfg, save_data_path)
+
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="backtest")
@@ -29,6 +45,7 @@ def main(cfg: DictConfig):
     try:
         data_processor = DataProcessor(cfg)
         data_processor.load_data()
+        data_processor.engineer_features()
     except Exception as e:
         print(f"An error occurred: {e}")
 
