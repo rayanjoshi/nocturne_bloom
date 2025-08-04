@@ -7,7 +7,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 
-def feature_engineering(dataFrame, cfg: DictConfig):
+def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     print("Starting feature engineering...")
 
     for col in ['Close','Open', 'High', 'Low', 'Volume', 'PB_Ratio', 'PE_Ratio']:
@@ -97,14 +97,12 @@ def feature_engineering(dataFrame, cfg: DictConfig):
     # Convert relative paths to absolute paths within the repository
     script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
     repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-    
-    preprocessing_data_path = repo_root / cfg.features.preprocessing_data_path.lstrip('../')
 
     # Save processed data
-    preprocessing_data_path.parent.mkdir(parents=True, exist_ok=True)
-    dataFrame.to_csv(preprocessing_data_path, index=True)
+    save_data_path.parent.mkdir(parents=True, exist_ok=True)
+    dataFrame.to_csv(save_data_path, index=True)
 
-    print(f"Processed data saved to {preprocessing_data_path.absolute()}")
+    print(f"Processed data saved to {save_data_path.absolute()}")
     print("--------- Feature Engineering Statistics ---------")
     print(f"Total features created: {len(dataFrame.columns)}")
     print(f"Dataset shape: {dataFrame.shape}")
@@ -121,10 +119,11 @@ def main(cfg: DictConfig):
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
         raw_data_path = repo_root / cfg.data_loader.raw_data_path.lstrip('../')
+        save_data_path = repo_root / cfg.features.preprocessing_data_path.lstrip('../')
         
         print(f"Reading raw data from: {raw_data_path.absolute()}")
-        dataFrame = pd.read_csv(raw_data_path, header=0, skiprows=[1,2], index_col=0, parse_dates=True)
-        feature_engineering(dataFrame, cfg)
+        dataFrame = pd.read_csv(raw_data_path, header=0, index_col=0, parse_dates=True)
+        feature_engineering(dataFrame, cfg, save_data_path)
     except Exception as e:
         print(f"An error occurred: {e}")
         raise
