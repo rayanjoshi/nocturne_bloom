@@ -55,6 +55,6 @@ def main(cfg: DictConfig):
 
     torch.manual_seed(cfg.trainer.seed)
     trainer.fit(model, datamodule=data_module)
-    
+    model.save_components()  # Save model components after training
 if __name__ == "__main__":
     main()
