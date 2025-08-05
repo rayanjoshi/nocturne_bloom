@@ -101,10 +101,14 @@ class MakePredictions:
         cnn_state_dict = torch.load(cnnPath)
         model.cnn.load_state_dict(cnn_state_dict)
         
-        # Fit Ridge regressor on the evaluation data
-        print("Fitting Ridge regressor on evaluation data...")
-        model.ridge.fit(x, y)
-        print(f"Ridge regressor fitted on {len(y)} samples")
+        ridgePath = repo_root / self.cfg.model.ridgePath.lstrip('../')
+        ridge_state_dict = torch.load(ridgePath)
+        weightShape = ridge_state_dict['weight'].shape
+        biasShape = ridge_state_dict['bias'].shape
+        model.ridge.weight.data = torch.zeros(weightShape, dtype=torch.float32)
+        model.ridge.bias.data = torch.zeros(biasShape, dtype=torch.float32)
+        model.ridge.load_state_dict(ridge_state_dict)
+        model.ridge.is_fitted = True
         
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model.to(device)
