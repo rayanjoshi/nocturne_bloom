@@ -1,4 +1,3 @@
-import wrds
 import pandas as pd
 from pathlib import Path
 import hydra
@@ -9,6 +8,7 @@ import torch
 
 from data_loader import load_data
 from feature_engineering import feature_engineering
+from model_Ensemble import EnsembleModule
 
 
 class DataProcessor:
@@ -40,7 +40,7 @@ class DataProcessor:
             index_col=0, 
             parse_dates=True
         )
-        feature_engineering(dataFrame, self.cfg, save_data_path)
+        return feature_engineering(dataFrame, self.cfg, save_data_path)
     
     def data_module(self, dataFrame):
         print(f"Converting features to tensors for {self.cfg.data_loader.TICKER}")
@@ -83,13 +83,58 @@ class DataProcessor:
         return scaledX, scaledY
 
 
+class MakePredictions:
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
+
+    def load_model(self):
+        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
+        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predict
+        backtestX = repo_root / self.cfg.data_module.x_scaled_save_path.lstrip('../')
+        backtestY = repo_root / self.cfg.data_module.y_scaled_save_path.lstrip('../')
+        x = torch.load(backtestX)
+        y = torch.load(backtestY)
+        print(f"Loaded {len(x)} samples with shape {x.shape} and target shape {y.shape}")
+        model = EnsembleModule(self.cfg)
+
+        cnnPath = repo_root / self.cfg.model.cnnPath.lstrip('../')
+        cnn_state_dict = torch.load(cnnPath)
+        model.cnn.load_state_dict(cnn_state_dict)
+        
+        # Fit Ridge regressor on the evaluation data
+        print("Fitting Ridge regressor on evaluation data...")
+        model.ridge.fit(x, y)
+        print(f"Ridge regressor fitted on {len(y)} samples")
+        
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model.to(device)
+        model.eval()
+        x = x.to(device)
+        
+        predictions = []
+        for i in range(len(x)):
+            x_i = x[i].unsqueeze(0)  # add batch dim
+            with torch.no_grad():
+                cnn_pred = model.cnn(x_i)
+                ridge_pred = model.ridge(x_i)
+                pred = model.cnnWeight * cnn_pred + model.ridgeWeight * ridge_pred
+                if pred.dim() > 0:
+                    pred = pred.squeeze(-1)
+                predictions.append(pred.item())
+        
+        print(f"Generated {len(predictions)} predictions using CNN+Ridge")
+        return predictions
+
 
 @hydra.main(version_base=None, config_path="../configs", config_name="backtest")
 def main(cfg: DictConfig):
     try:
         data_processor = DataProcessor(cfg)
         data_processor.load_data()
-        data_processor.engineer_features()
+        dataFrame = data_processor.engineer_features()
+        data_processor.data_module(dataFrame)
+        make_predictions = MakePredictions(cfg)
+        make_predictions.load_model()
     except Exception as e:
         print(f"An error occurred: {e}")
 
