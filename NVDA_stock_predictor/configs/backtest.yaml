@@ -11,6 +11,14 @@ data_loader:
 features:
   preprocessing_data_path: data/preprocessing/nvda_preprocessed_evaluate_data.csv
 
+data_module:
+  window_size: 10
+  target_col: "close"
+  feature_scaler_path: models/feature_scaler.pkl
+  target_scaler_path: models/target_scaler.pkl
+  x_scaled_save_path: data/processed/nvda_x_scaled_evaluate_data.pt
+  y_scaled_save_path: data/processed/nvda_y_scaled_evaluate_data.pt
+
 backtest:
   lookback_window: 30
   initial_cash: 10000
