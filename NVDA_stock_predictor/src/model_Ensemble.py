@@ -122,7 +122,9 @@ class RidgeRegressor(nn.Module):
         else:
             self.weight = theta
             self.bias = torch.tensor(0.0, device=device)
-        
+        # Register as parameters (no gradient needed)
+        self.weight = nn.Parameter(self.weight, requires_grad=False)
+        self.bias = nn.Parameter(self.bias, requires_grad=False)
         self.is_fitted = True
         
     def forward(self, x):
@@ -675,9 +677,12 @@ class EnsembleModule(L.LightningModule):
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
         cnnPath = repo_root / self.cfg.model.cnnPath.lstrip('../')
+        ridgePath = repo_root / self.cfg.model.ridgePath.lstrip('../')
         cnnPath.parent.mkdir(parents=True, exist_ok=True)
+        ridgePath.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.cnn.state_dict(), cnnPath)
-        print(f"CNN model saved to {cnnPath}")
+        torch.save(self.ridge.state_dict(), ridgePath)
+        print(f"CNN model saved to {cnnPath} and Ridge model saved to {ridgePath}.")
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
