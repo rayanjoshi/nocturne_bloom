@@ -4,6 +4,8 @@ model:
   # non-normalized weighted averaging of CNN and Ridge regression outputs #
   cnnWeight: 0.4077282314032411
   ridgeWeight: 0.8981321236689797
+  cnnPath: models/cnn_model.pth
+  ridgePath: models/ridge_model.pth
 
 cnn:
   inputChannels: 40  # Number of features (RSI, MACD, etc.)

@@ -11,6 +11,7 @@ from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 import lightning as L
 from omegaconf import DictConfig
+from pathlib import Path
 class CNN(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
@@ -670,6 +671,17 @@ class EnsembleModule(L.LightningModule):
         self.r2_val.reset()
         self.direction_accuracy_val.reset()
     
+    def save_components(self):
+        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
+        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
+        cnnPath = repo_root / self.cfg.model.cnnPath.lstrip('../')
+        ridgePath = repo_root / self.cfg.model.ridgePath.lstrip('../')
+        cnnPath.parent.mkdir(parents=True, exist_ok=True)
+        ridgePath.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.cnn.state_dict(), cnnPath)
+        torch.save(self.ridge.state_dict(), ridgePath)
+        print(f"CNN model saved to {cnnPath}. Ridge model saved to {ridgePath}")
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             self.parameters(), 
