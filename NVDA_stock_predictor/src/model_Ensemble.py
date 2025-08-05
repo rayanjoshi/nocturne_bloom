@@ -63,8 +63,8 @@ class RidgeRegressor(nn.Module):
         self.fit_intercept = cfg.Ridge.get('fit_intercept', True)
 
         # Ridge parameters (will be set during fit)
-        self.weight = None
-        self.bias = None
+        self.weight = nn.Parameter(torch.tensor([0,0]), requires_grad=False)
+        self.bias = nn.Parameter(torch.tensor(0.0), requires_grad=False)
         self.is_fitted = False
         
     def fit(self, X, y):
@@ -117,14 +117,12 @@ class RidgeRegressor(nn.Module):
         
         # Split weight and bias
         if self.fit_intercept:
-            self.weight = theta[:-1]
-            self.bias = theta[-1]
+            self.weight.data = theta[:-1].clone()
+            self.bias.data = theta[-1].clone()
         else:
-            self.weight = theta
-            self.bias = torch.tensor(0.0, device=device)
+            self.weight.data = theta.clone()
+            self.bias.data = torch.tensor(0.0, device=device)
         # Register as parameters (no gradient needed)
-        self.weight = nn.Parameter(self.weight, requires_grad=False)
-        self.bias = nn.Parameter(self.bias, requires_grad=False)
         self.is_fitted = True
         
     def forward(self, x):
