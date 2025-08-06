@@ -149,6 +149,13 @@ class MakePredictions:
         dataFramePredictions.insert(2, 'Close', close_values)
         error = np.abs(dataFramePredictions['Predicted'] - dataFramePredictions['Close'])
         dataFramePredictions.insert(3, 'Error', error.round(3))
+        # Calculate direction: 1 if next value > current, -1 if next < current, 0 if equal
+        pred_diff = np.diff(dataFramePredictions['Predicted'])
+        close_diff = np.diff(dataFramePredictions['Close'])
+        direction = np.where((pred_diff > 0) == (close_diff > 0), 'yes', 'no')
+        # Pad with NaN for first row to align length
+        direction = np.insert(direction, 0, np.nan)
+        dataFramePredictions.insert(4, 'Direction_Match', direction)
         save_path = repo_root / self.cfg.backtest.predictions_save_path.lstrip('../')
         save_path.parent.mkdir(parents=True, exist_ok=True)
         dataFramePredictions.to_csv(save_path, index=False)
