@@ -90,6 +90,10 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     # Drop rows with NaN values
     dataFrame.dropna(inplace=True)
 
+    # Shift target column by -1 for next-day prediction
+    dataFrame['Target'] = dataFrame['Close'].shift(-1)
+    dataFrame.dropna(inplace=True)
+
     # No scaling here - will be done in data_module.py after temporal split
     print("Feature engineering complete - no scaling applied")
     print("Scaling will be performed in data_module.py after train/val split to avoid data leakage")
