@@ -128,6 +128,31 @@ class MakePredictions:
         
         print(f"Generated {len(predictions)} predictions using CNN+Ridge")
         return predictions
+    
+    def savePredictions(self, predictions):
+        script_dir = Path(__file__).parent
+        repo_root = script_dir.parent
+        scalerPath = repo_root / self.cfg.data_module.target_scaler_path.lstrip('../')
+        target_scaler = joblib.load(scalerPath)
+        predictions = np.array(predictions).reshape(-1, 1)
+        predictions = target_scaler.inverse_transform(predictions).flatten()
+        dataFramePredictions = pd.DataFrame(predictions, columns=['Predicted'])
+        
+        evaluate_data_path = repo_root / self.cfg.features.preprocessing_data_path.lstrip('../')
+        # load preprocessed data and align to predictions
+        df_eval = pd.read_csv(evaluate_data_path, header=0, index_col=0, parse_dates=True)
+        dates = df_eval.index[self.cfg.data_module.window_size:]
+        dataFramePredictions.insert(0, 'Time', dates)
+        close_values = df_eval['Close'].values[self.cfg.data_module.window_size:]
+        dataFramePredictions['Predicted'] = dataFramePredictions['Predicted'].round(3)
+        close_values = np.round(close_values, 3)
+        dataFramePredictions.insert(2, 'Close', close_values)
+        error = np.abs(dataFramePredictions['Predicted'] - dataFramePredictions['Close'])
+        dataFramePredictions.insert(3, 'Error', error.round(3))
+        save_path = repo_root / self.cfg.backtest.predictions_save_path.lstrip('../')
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        dataFramePredictions.to_csv(save_path, index=False)
+        print(f"Saved predictions with time column to {save_path}")
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="backtest")
@@ -138,7 +163,7 @@ def main(cfg: DictConfig):
         dataFrame = data_processor.engineer_features()
         data_processor.data_module(dataFrame)
         make_predictions = MakePredictions(cfg)
-        make_predictions.load_model()
+        make_predictions.savePredictions(make_predictions.load_model())
     except Exception as e:
         print(f"An error occurred: {e}")
 

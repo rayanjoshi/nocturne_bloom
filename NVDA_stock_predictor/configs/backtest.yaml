@@ -23,6 +23,7 @@ data_module:
   y_scaled_save_path: data/processed/nvda_y_scaled_evaluate_data.pt
 
 backtest:
+  predictions_save_path: data/predictions/nvda_predictions.csv
   lookback_window: 30
   initial_cash: 10000
   strategy: "baseline"
