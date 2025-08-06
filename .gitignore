@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+NVDA_stock_predictor/data/predictions/*
 NVDA_stock_predictor/data/preprocessing/*
 NVDA_stock_predictor/data/raw/*
 NVDA_stock_predictor/data/processed/*
