@@ -7,7 +7,7 @@ import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 from omegaconf import DictConfig
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
 
 class SimpleTensorDataset(Dataset):
     """Simple dataset for tensor data used in Lightning dataloaders"""
@@ -58,7 +58,7 @@ class StockDataset(Dataset):
         
         # Scale features (fit on train only)
         print("Scaling features...")
-        feature_scaler = StandardScaler()
+        feature_scaler = RobustScaler()
         
         # Reshape for scaling: (samples * timesteps, features)
         x_train_reshaped = x_train.reshape(-1, x_train.shape[-1])
@@ -71,7 +71,7 @@ class StockDataset(Dataset):
         
         # Scale targets (fit on train only)
         print("Scaling targets...")
-        target_scaler = StandardScaler()
+        target_scaler = RobustScaler()
         y_train_scaled = target_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
         y_val_scaled = target_scaler.transform(y_val.reshape(-1, 1)).flatten()
         
