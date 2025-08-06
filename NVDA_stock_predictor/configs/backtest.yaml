@@ -16,7 +16,7 @@ features:
 
 data_module:
   window_size: 10
-  target_col: "Close"
+  target_col: "Target"
   feature_scaler_path: models/feature_scaler.pkl
   target_scaler_path: models/target_scaler.pkl
   x_scaled_save_path: data/processed/nvda_x_scaled_evaluate_data.pt

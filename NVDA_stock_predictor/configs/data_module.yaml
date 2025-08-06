@@ -1,6 +1,6 @@
 data_module:
   window_size: 10
-  target_col: Close
+  target_col: Target
   x_save_path: data/processed/nvda_processed_x.pt
   y_save_path: data/processed/nvda_processed_y.pt
   y_scaled_save_path: models/target_scaler.pkl
