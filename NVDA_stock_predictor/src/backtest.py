@@ -5,6 +5,7 @@ from omegaconf import DictConfig
 import numpy as np
 import joblib
 import torch
+import backtrader as bt
 
 from data_loader import load_data
 from feature_engineering import feature_engineering
@@ -162,6 +163,133 @@ class MakePredictions:
         print(f"Saved predictions with time column to {save_path}")
 
 
+class TradingSimulation:
+    def __init__(self, cfg: DictConfig, predictions):
+        self.cfg = cfg
+        script_dir = Path(__file__).parent
+        repo_root = script_dir.parent
+        data_path = repo_root / self.cfg.backtest.predictions_save_path.lstrip('../')
+        df = pd.read_csv(data_path)
+        self.predictions = df['Predicted'].values
+        self.close_prices = df['Close'].values
+        self.dates = df['Time'].values if 'Time' in df.columns else None
+
+    def run(self):
+        cerebro = bt.Cerebro()
+        cerebro.addstrategy(StrategySimulation, predictions=self.predictions, close_prices=self.close_prices, dates=self.dates)
+
+        # For Backtrader, create OHLCV DataFrame
+        # Use Close from CSV, fill OHLC with Close, Volume=0
+        df = pd.DataFrame({
+            'Open': self.close_prices,
+            'High': self.close_prices,
+            'Low': self.close_prices,
+            'Close': self.close_prices,
+            'Volume': 0
+        })
+        if self.dates is not None:
+            df.index = pd.to_datetime(self.dates)
+        data = bt.feeds.PandasData(
+            dataname=df,
+            datetime=None,
+            open='Open',
+            high='High',
+            low='Low',
+            close='Close',
+            volume='Volume',
+            openinterest=None
+        )
+        cerebro.adddata(data)
+
+        cerebro.broker.setcash(1000000.00)
+        cerebro.broker.setcommission(commission=0.001)
+
+        print(f"Starting Portfolio Value: {cerebro.broker.getvalue():.2f}")
+        cerebro.run()
+        print(f"Ending Portfolio Value: {cerebro.broker.getvalue():.2f}")
+
+class StrategySimulation(bt.Strategy):
+    params = dict(threshold=0.01, size=100)
+
+    def __init__(self, predictions, close_prices, dates=None):
+        self.predictions = predictions
+        self.close_prices = close_prices
+        self.dates = dates
+        self.order = None
+        self.data.close = self.datas[0].close
+    
+    def log(self, txt, dt=None):
+        idx = len(self)
+        if self.dates is not None and idx < len(self.dates):
+            dt = pd.to_datetime(self.dates[idx]).date()
+        else:
+            dt = dt or self.datas[0].datetime.date(0)
+        print(f"{dt.isoformat()} {txt}")
+    
+    def next(self):
+        idx = len(self)
+        if idx >= len(self.predictions):
+            return  # Avoid index error if predictions are shorter than data
+        current_close = self.close_prices[idx]
+        predicted_close = self.predictions[idx]
+        if np.isnan(predicted_close) or np.isnan(current_close):
+            return
+        predicted_return = (predicted_close - current_close) / current_close
+        self.log(f"Close, {current_close:.2f} | Predicted, {predicted_close:.2f}")
+
+        # Close any open position
+        if self.position:
+            if (self.position.size > 0 and predicted_return < self.p.threshold) or \
+                (self.position.size < 0 and predicted_return > -self.p.threshold):
+                self.log('CLOSE POSITION, %.2f' % current_close)
+                self.order = self.close()
+
+        # Long signal
+        elif predicted_return > self.p.threshold:
+            self.log('BUY CREATE, %.2f' % current_close)
+            self.order = self.buy(size=self.p.size)
+
+        # Short signal
+        elif predicted_return < -self.p.threshold:
+            self.log('SELL CREATE, %.2f' % current_close)
+            self.order = self.sell(size=self.p.size)
+
+    def notify_order(self, order):
+        if order.status in [order.Submitted, order.Accepted]:
+            # Buy/Sell order submitted/accepted to/by broker - Nothing to do
+            return
+
+        # Check if an order has been completed
+        # Attention: broker could reject order if not enough cash
+        if order.status in [order.Completed]:
+            if order.isbuy():
+                self.log(
+                    'BUY EXECUTED, Price: %.2f, Cost: %.2f, Comm %.2f' %
+                    (order.executed.price, order.executed.value, order.executed.comm)
+                    )
+
+                self.buyprice = order.executed.price
+                self.buycomm = order.executed.comm
+            else:  # Sell
+                self.log(
+                    'SELL EXECUTED, Price: %.2f, Cost: %.2f, Comm %.2f' %
+                    (order.executed.price, order.executed.value, order.executed.comm)
+                    )
+
+            self.bar_executed = len(self)
+
+        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
+            self.log('Order Canceled/Margin/Rejected')
+
+        # Write down: no pending order
+        self.order = None
+
+    def notify_trade(self, trade):
+        if not trade.isclosed:
+            return
+
+        self.log('OPERATION PROFIT, GROSS %.2f, NET %.2f' % (trade.pnl, trade.pnlcomm))
+
 @hydra.main(version_base=None, config_path="../configs", config_name="backtest")
 def main(cfg: DictConfig):
     try:
@@ -170,7 +298,11 @@ def main(cfg: DictConfig):
         dataFrame = data_processor.engineer_features()
         data_processor.data_module(dataFrame)
         make_predictions = MakePredictions(cfg)
-        make_predictions.savePredictions(make_predictions.load_model())
+
+        predictions = make_predictions.load_model()
+        make_predictions.savePredictions(predictions)
+        backtest = TradingSimulation(cfg, predictions)
+        backtest.run()
     except Exception as e:
         print(f"An error occurred: {e}")
 
