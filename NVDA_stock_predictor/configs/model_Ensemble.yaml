@@ -1,9 +1,9 @@
 model:
   target_sequence_length: 1  # Predicting the next closing price
-  huber_delta: 0.42001535863611617  # Delta for Huber loss, can be adjusted based on the dataset
+  huber_delta: 0.8288857561266221  # Delta for Huber loss, can be adjusted based on the dataset
   # non-normalized weighted averaging of CNN and Ridge regression outputs #
-  cnnWeight: 0.4077282314032411
-  ridgeWeight: 0.8981321236689797
+  cnnWeight: 0.2544083122577287
+  ridgeWeight: 0.8957581902231047
   cnnPath: models/cnn_model.pth
   ridgePath: models/ridge_model.pth
 
@@ -11,16 +11,16 @@ model:
 cnn:
   inputChannels: 41  # Number of features (RSI, MACD, etc.)
   cnnChannels: [32, 64, 32]  # Reduced capacity to prevent overfitting
-  kernelSize: [5, 3, 2]
-  poolSize: [2, 2, 3]  # Pooling after each CNN layer
-  poolPadding: [0,0,0]
+  kernelSize: [3, 5, 3]
+  poolSize: [3, 2, 2]  # Pooling after each CNN layer
+  poolPadding: [1, 1, 1]
   padding: [1, 1, 1]  # kernel_size // 2 for each dimension
   stride: 1
   dropout: [0.2, 0.3]
   outputSize: 1
 
 Ridge:
-  alpha: 0.02766091107194421  # Regularization strength for Ridge regression, can be adjusted based on the dataset
+  alpha: 0.17670112426077156  # Regularization strength for Ridge regression, can be adjusted based on the dataset
 
 classifiers:
   numEstimators: 100
@@ -47,11 +47,11 @@ classifiers:
 
 optimiser:
   name: 'adam'
-  lr: 0.00018214688395543804
-  weightDecay: 2.3361411158742311e-07  # L2 regularization term 
+  lr: 0.0006932724422582114
+  weightDecay: 0.00024377698646933416  # L2 regularization term 
   eps: 1e-08 
   amsgrad: False  # Whether to use AMSGrad variant of Adam
   schedulerMode: 'min'
-  schedulerFactor: 0.49702858354305074
-  schedulerPatience: 3
+  schedulerFactor: 0.45376849051832774
+  schedulerPatience: 5
   schedulerMinLR: 1e-7 
