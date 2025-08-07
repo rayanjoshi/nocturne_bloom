@@ -109,7 +109,7 @@ def define_search_space_r2():
         "Ridge.alpha": tune.loguniform(0.001, 100.0),
         
         # Optimizer settings
-        "optimiser.name": tune.choice(["adam", "sgd"]),
+        "optimiser.name": tune.choice(["adam"]),
         "optimiser.lr": tune.loguniform(1e-6, 1e-2),
         "optimiser.weightDecay": tune.loguniform(1e-7, 1e-2),
         "optimiser.schedulerFactor": tune.uniform(0.2, 0.7),
