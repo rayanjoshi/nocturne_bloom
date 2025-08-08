@@ -1,14 +1,9 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-import skorch
-from skorch import NeuralNetClassifier
-from torchmetrics import MeanAbsoluteError, MeanSquaredError, Accuracy
+from torchmetrics import MeanAbsoluteError, MeanSquaredError
 from torchmetrics.regression import R2Score
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.svm import SVC
-from sklearn.ensemble import RandomForestClassifier
+
 import lightning as L
 from omegaconf import DictConfig
 from pathlib import Path
