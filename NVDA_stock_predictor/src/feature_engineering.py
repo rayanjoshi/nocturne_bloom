@@ -10,7 +10,7 @@ from omegaconf import DictConfig
 def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     print("Starting feature engineering...")
 
-    for col in ['Close','Open', 'High', 'Low', 'Volume', 'PB_Ratio', 'PE_Ratio']:
+    for col in ['Close','Open', 'High', 'Low', 'Volume', 'PB_Ratio', 'PE_Ratio', 'SPY_Close', 'QQQ_Close', 'SOXX_Close', 'VIX_Proxy', 'Treasury_10Y']:
         if col in dataFrame.columns:
             dataFrame[col] = pd.to_numeric(dataFrame[col], errors='coerce')
 
@@ -83,16 +83,55 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     
     # --------- Technical Indicators --------- #
     dataFrame['sigma'] = dataFrame['Close'].rolling(window=20).std()
-    dataFrame['beta'] = dataFrame['Close'].rolling(window=20).cov(dataFrame['Volume']) / dataFrame['Volume'].rolling(window=20).var()
-        
+    dataFrame['beta'] = dataFrame['Close'].rolling(window=20).cov(dataFrame['Volume']) / dataFrame['Volume'].rolling(window=20).var()   
     dataFrame['skewness'] = dataFrame['Close'].rolling(window=20).skew()
+    
+    # AI Boom Proxies - Enhanced with multiple tech indicators
+    dataFrame['tech_sector_rotation'] = dataFrame['Close'] / dataFrame['SPY_Close'] - 1
+    dataFrame['nasdaq_relative_strength'] = dataFrame['Close'] / dataFrame['QQQ_Close'] - 1
+    dataFrame['semiconductor_strength'] = dataFrame['Close'] / dataFrame['SOXX_Close'] - 1
+    
+    # Tech sector momentum indicators
+    dataFrame['spy_qqq_spread'] = (dataFrame['QQQ_Close'] / dataFrame['SPY_Close']).pct_change()
+    dataFrame['soxx_qqq_spread'] = (dataFrame['SOXX_Close'] / dataFrame['QQQ_Close']).pct_change()
+    
+    # AI Boom Detection Features (using tech leadership indicators)
+    dataFrame['tech_leadership'] = (dataFrame['QQQ_Close'].pct_change() - dataFrame['SPY_Close'].pct_change()).rolling(10).mean()
+    dataFrame['semiconductor_leadership'] = (dataFrame['SOXX_Close'].pct_change() - dataFrame['QQQ_Close'].pct_change()).rolling(10).mean()
+    dataFrame['nvda_outperformance'] = (dataFrame['Close'].pct_change() - dataFrame['SOXX_Close'].pct_change()).rolling(5).mean()
 
-    # Drop rows with NaN values
-    dataFrame.dropna(inplace=True)
+    # Volatility Regime Detection - Enhanced with market-wide volatility
+    # Calculate rolling volatility for 5-day and 21-day windows
+    dataFrame['rolling_vol_5'] = dataFrame['Close'].pct_change().rolling(5).std()
+    dataFrame['rolling_vol_21'] = dataFrame['Close'].pct_change().rolling(21).std()
+    dataFrame['vol_percentile_21d'] = dataFrame['rolling_vol_21'].rolling(126).rank(pct=True)  # Reduced from 252 to 126 (6 months)
+    dataFrame['vol_percentile_5d'] = dataFrame['rolling_vol_5'].rolling(63).rank(pct=True)
+    dataFrame['regime_high_vol'] = (dataFrame['vol_percentile_21d'] > 0.8).astype(int)
+    
+    # Market volatility indicators using VIX proxy
+    dataFrame['vix_normalized'] = (dataFrame['VIX_Proxy'] - dataFrame['VIX_Proxy'].rolling(126).mean()) / dataFrame['VIX_Proxy'].rolling(126).std()  # Reduced from 252
+    dataFrame['vix_regime'] = (dataFrame['VIX_Proxy'] > dataFrame['VIX_Proxy'].rolling(126).quantile(0.75)).astype(int)
+    dataFrame['vol_divergence'] = dataFrame['rolling_vol_21'] - (dataFrame['VIX_Proxy'] / 100)  # Normalize VIX to comparable scale
 
-    # Shift target column by -1 for next-day prediction
+    # Gap Analysis (critical for 2023-2024)
+    dataFrame['overnight_gap'] = (dataFrame['Open'] - dataFrame['Close'].shift(1)) / dataFrame['Close'].shift(1)
+    dataFrame['gap_magnitude_avg_5d'] = dataFrame['overnight_gap'].abs().rolling(5).mean()
+    dataFrame['large_gap_frequency'] = (dataFrame['overnight_gap'].abs() > 0.03).rolling(20).sum()
+
+    # Options Activity Proxies - Enhanced volume analysis
+    dataFrame['volume_surge'] = dataFrame['Volume'] / dataFrame['Volume'].rolling(20).mean()
+    dataFrame['volume_vol'] = dataFrame['Volume'].rolling(20).std() / dataFrame['Volume'].rolling(20).mean()
+    dataFrame['volume_price_trend'] = dataFrame['Volume'].rolling(5).corr(dataFrame['Close'])
+    
+    # Cross-Asset Correlations (became important in AI boom)
+    dataFrame['vix_spread'] = dataFrame['VIX_Proxy'] - dataFrame['VIX_Proxy'].rolling(20).mean()
+    dataFrame['spy_nvda_correlation'] = dataFrame['Close'].pct_change().rolling(20).corr(dataFrame['SPY_Close'].pct_change())
+    dataFrame['qqq_nvda_correlation'] = dataFrame['Close'].pct_change().rolling(20).corr(dataFrame['QQQ_Close'].pct_change())
+    dataFrame['treasury_equity_spread'] = dataFrame['Treasury_10Y'].diff() * -1  # Inverse relationship with equities
+
+    # Shift target column by -1 for next-day prediction BEFORE dropping NaN
     dataFrame['Target'] = dataFrame['Close'].shift(-1)
-    dataFrame.dropna(inplace=True)
+    dataFrame.dropna(inplace=True)  # Drop NaN values after shifting target
 
     # No scaling here - will be done in data_module.py after temporal split
     print("Feature engineering complete - no scaling applied")
