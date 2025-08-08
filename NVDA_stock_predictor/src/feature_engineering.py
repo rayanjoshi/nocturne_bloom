@@ -6,6 +6,7 @@ from ta.volume import OnBalanceVolumeIndicator, ChaikinMoneyFlowIndicator, Force
 from pathlib import Path
 import hydra
 from omegaconf import DictConfig
+import numpy as np
 
 def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     print("Starting feature engineering...")
@@ -128,7 +129,76 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['spy_nvda_correlation'] = dataFrame['Close'].pct_change().rolling(20).corr(dataFrame['SPY_Close'].pct_change())
     dataFrame['qqq_nvda_correlation'] = dataFrame['Close'].pct_change().rolling(20).corr(dataFrame['QQQ_Close'].pct_change())
     dataFrame['treasury_equity_spread'] = dataFrame['Treasury_10Y'].diff() * -1  # Inverse relationship with equities
+    
+    # Momentum acceleration features
+    dataFrame['rsi_momentum'] = dataFrame['RSI'].diff(5)
+    dataFrame['price_acceleration'] = dataFrame['Close'].pct_change(5) - dataFrame['Close'].pct_change(10)
+    dataFrame['volume_momentum'] = dataFrame['volume_surge'].diff(3)
 
+    # Multi-timeframe momentum
+    dataFrame['momentum_1d'] = dataFrame['Close'].pct_change(1)
+    dataFrame['momentum_5d'] = dataFrame['Close'].pct_change(5)
+    dataFrame['momentum_10d'] = dataFrame['Close'].pct_change(10)
+    dataFrame['momentum_consistency'] = (
+        (dataFrame['momentum_1d'] > 0).rolling(5).sum() / 5
+    )
+    # Trend strength indicators
+    dataFrame['trend_strength'] = (dataFrame['Close'] > dataFrame['SMA_200']).rolling(20).mean()
+    dataFrame['bull_market_intensity'] = (
+        (dataFrame['Close'] > dataFrame['SMA_50']).astype(int) +
+        (dataFrame['SMA_50'] > dataFrame['SMA_200']).astype(int) +
+        (dataFrame['Close'].pct_change(20) > 0.1).astype(int)
+    )
+
+    # Breakout detection
+    dataFrame['price_vs_bb_position'] = (dataFrame['Close'] - dataFrame['BBLow']) / (dataFrame['BBHigh'] - dataFrame['BBLow'])
+    dataFrame['breakout_signal'] = (dataFrame['Close'] > dataFrame['BBHigh']).astype(int)
+    # Quarterly patterns (rough earnings proxy)
+    dataFrame['days_in_quarter'] = (dataFrame.index.dayofyear % 90)
+    dataFrame['earnings_proximity'] = np.where(
+        dataFrame['days_in_quarter'].isin([1, 2, 3, 88, 89, 0]), 1, 0
+    )
+
+    # Unusual activity detection
+    dataFrame['volume_price_divergence'] = (
+        dataFrame['volume_surge'] - dataFrame['Close'].pct_change().abs().rolling(5).mean()
+    )
+    
+    # Options-like activity detection
+    dataFrame['volume_skew'] = dataFrame['Volume'].rolling(20).skew()
+    dataFrame['volume_acceleration'] = dataFrame['Volume'].pct_change(5)
+    dataFrame['volume_breakout'] = (dataFrame['Volume'] > dataFrame['Volume'].rolling(50).quantile(0.9)).astype(int)
+    
+    # Enhanced sector momentum
+    dataFrame['sector_momentum_divergence'] = (
+        dataFrame['Close'].pct_change(10) - dataFrame['SOXX_Close'].pct_change(10)
+    )
+    dataFrame['mega_cap_rotation'] = (
+        dataFrame['QQQ_Close'].pct_change(5) - dataFrame['SPY_Close'].pct_change(5)
+    ).rolling(10).mean()
+
+    # Momentum persistence
+    dataFrame['momentum_persistence_3d'] = (
+        (dataFrame['nvda_outperformance'] > 0).rolling(3).sum() / 3
+    )
+
+    dataFrame['ai_momentum_strength'] = (
+        dataFrame['nvda_outperformance'] * 
+        dataFrame['tech_leadership'] * 
+        dataFrame['semiconductor_strength']
+    )
+
+    # Accelerating momentum signal
+    dataFrame['momentum_acceleration'] = (
+        dataFrame['ai_momentum_strength'].diff(1) + 
+        dataFrame['ai_momentum_strength'].diff(2)
+    ) / 2
+    
+    # Volume-confirmed momentum
+    dataFrame['confirmed_momentum'] = (
+        dataFrame['ai_momentum_strength'] * 
+        (dataFrame['volume_surge'] > 1).astype(float)
+    )
     # Shift target column by -1 for next-day prediction BEFORE dropping NaN
     dataFrame['Target'] = dataFrame['Close'].shift(-1)
     dataFrame.dropna(inplace=True)  # Drop NaN values after shifting target
