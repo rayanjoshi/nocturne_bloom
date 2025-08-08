@@ -58,7 +58,7 @@ class StockDataset(Dataset):
         
         # Scale features (fit on train only)
         print("Scaling features...")
-        feature_scaler = RobustScaler()
+        feature_scaler = RobustScaler(quantile_range=(10.0, 95.0))
         
         # Reshape for scaling: (samples * timesteps, features)
         x_train_reshaped = x_train.reshape(-1, x_train.shape[-1])
