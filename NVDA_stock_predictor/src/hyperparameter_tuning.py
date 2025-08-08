@@ -18,46 +18,6 @@ from model_Ensemble import EnsembleModule
 from data_module import StockDataModule
 
 
-def define_search_space_directional():
-    """Define search space optimized for directional accuracy"""
-    return {
-        # Classifier hyperparameters
-        # Number of estimators for tree-based models
-        # Number of estimators for GB and RF (list of two ints)
-        "classifiers.numEstimators": tune.choice([[100, 100], [200, 200], [300, 300], [400, 400], [500, 500]]),
-        # Learning rate for classifiers
-        "classifiers.learningRate": tune.loguniform(1e-5, 1e-2),
-        # Maximum tree depth
-        # Maximum tree depths for GB and RF (list of two ints)
-        "classifiers.maxDepth": tune.choice([[2, 2], [5, 5], [8, 8], [10, 10]]),
-        # Minimum samples to split an internal node
-        # Min samples split for GB and RF (list of two ints)
-        "classifiers.minSamplesSplit": tune.choice([[2, 2], [5, 5], [8, 8], [10, 10]]),
-        # Minimum samples per leaf
-        # Min samples leaf for GB and RF (list of two ints)
-        "classifiers.minSamplesLeaf": tune.choice([[1, 1], [2, 2], [5, 5], [10, 10]]),
-        # Subsampling ratio for tree-based models
-        "classifiers.subSample": tune.uniform(0.1, 0.9),
-        # Regularization parameter C for logistic/SVM
-        # Regularization C for Logistic (index 0) and SVM (index 1)
-        "classifiers.C": tune.choice([[0.1, 0.1], [0.5, 0.5], [1.0, 1.0], [5.0, 5.0], [10.0, 10.0]]),
-        # Maximum iterations for logistic regression / SVM
-        # Max iterations for LogisticRegression
-        "classifiers.maxIterations": tune.choice([100, 200, 500, 1000]),
-        
-        # Training settings
-        "trainer.max_epochs": tune.choice([30, 50, 70]),
-        "trainer.early_stopping_patience": tune.choice([5, 8, 10, 15]),
-        "trainer.early_stopping_delta": tune.loguniform(1e-5, 1e-2),
-        
-        # Classifier ensemble weights
-        "classifiers.GBWEIGHT": tune.uniform(0.2, 0.4),
-        "classifiers.RFWEIGHT": tune.uniform(0.2, 0.4),
-        "classifiers.LOGISTICWEIGHT": tune.uniform(0.1, 0.3),
-        "classifiers.SVMWEIGHT": tune.uniform(0.1, 0.3),
-    }
-
-
 def define_search_space_r2():
     """Define search space optimized for R2 score"""
     return {
@@ -123,7 +83,7 @@ def define_search_space_r2():
     }
 
 
-def train_model(config, base_cfg, optimization_target="directional"):
+def train_model(config, base_cfg, optimization_target="val_mae"):
     """Training function for Ray Tune"""
     # Create a copy of base config and update with tune parameters
     cfg = OmegaConf.create(OmegaConf.to_yaml(base_cfg))
@@ -143,23 +103,15 @@ def train_model(config, base_cfg, optimization_target="directional"):
     
     cfg = OmegaConf.create(cfg_dict)
     
-    # Ensure weights sum to 1.0 for classifier ensemble
-    total_weight = (cfg.classifiers.GBWEIGHT + cfg.classifiers.RFWEIGHT + 
-                    cfg.classifiers.LOGISTICWEIGHT + cfg.classifiers.SVMWEIGHT)
-    cfg.classifiers.GBWEIGHT /= total_weight
-    cfg.classifiers.RFWEIGHT /= total_weight
-    cfg.classifiers.LOGISTICWEIGHT /= total_weight
-    cfg.classifiers.SVMWEIGHT /= total_weight
-    
     # Setup temporary directory for this trial
     with tempfile.TemporaryDirectory() as temp_dir:
         # Configure callbacks
         checkpoint_callback = ModelCheckpoint(
-            monitor="val_r2",
+            monitor="val_mae",
             dirpath=temp_dir,
-            filename="model-{epoch:02d}-{val_r2:.2f}",
+            filename="model-{epoch:02d}-{val_mae:.2f}",
             save_top_k=1,
-            mode="max",
+            mode="min",
         )
         
         early_stopping_callback = EarlyStopping(
@@ -197,22 +149,14 @@ def train_model(config, base_cfg, optimization_target="directional"):
         val_results = trainer.validate(model, datamodule=data_module, verbose=False)
         
         # Report metrics based on optimization target
-        if optimization_target == "directional":
-            metrics = {
-                "val_direction_acc": val_results[0]["val_direction_acc"],
-                "val_loss": val_results[0]["val_loss"],
-                "val_mae": val_results[0]["val_mae"],
-                "epoch": trainer.current_epoch
-            }
-        else:  # R2 optimization
-            metrics = {
-                "val_r2": val_results[0]["val_r2"],
-                "val_loss": val_results[0]["val_loss"],
-                "val_mae": val_results[0]["val_mae"],
-                "val_rmse": val_results[0]["val_rmse"],
-                "val_direction_acc": val_results[0]["val_direction_acc"],
-                "epoch": trainer.current_epoch
-            }
+
+        metrics = {
+            "val_r2": val_results[0]["val_r2"],
+            "val_loss": val_results[0]["val_loss"],
+            "val_mae": val_results[0]["val_mae"],
+            "val_rmse": val_results[0]["val_rmse"],
+            "epoch": trainer.current_epoch
+        }
         
         tune.report(metrics=metrics)
 
@@ -225,33 +169,13 @@ def main(cfg: DictConfig):
         ray.init(ignore_reinit_error=True)
     
     print("=== NVDA Stock Predictor Hyperparameter Optimization ===")
-    print("Choose optimization target:")
-    print("1. Directional Accuracy (faster, good for initial exploration)")
-    print("2. R2 Score (comprehensive, better for final model)")
-    
-    choice = input("Enter choice (1 or 2): ").strip()
-    
-    if choice == "1":
-        search_space = define_search_space_directional()
-        metric = "val_direction_acc"  # Fixed metric name to match model
-        mode = "max"
-        num_samples = 50
-        max_concurrent = 5
-        print("\n🎯 Optimizing for Directional Accuracy")
-    elif choice == "2":
-        search_space = define_search_space_r2()
-        metric = "val_r2"
-        mode = "max"
-        num_samples = 100
-        max_concurrent = 5
-        print("\n📈 Optimizing for R2 Score")
-    else:
-        print("Invalid choice. Defaulting to Directional Accuracy.")
-        search_space = define_search_space_directional()
-        metric = "val_direction_acc"  # Fixed metric name
-        mode = "max"
-        num_samples = 50
-        max_concurrent = 4
+    search_space = define_search_space_r2()
+    metric = "val_mae"
+    mode = "min"
+    num_samples = 100
+    max_concurrent = 5
+    print("\n📈 Optimizing for MAE")
+
     
     # Configure scheduler
     scheduler = ASHAScheduler(
@@ -271,16 +195,11 @@ def main(cfg: DictConfig):
     )
     
     # Configure reporter
-    if choice == "1":
-        reporter = CLIReporter(
-            metric_columns=["val_direction_acc", "val_loss", "val_mae", "epoch"],
-            max_report_frequency=30
-        )
-    else:
-        reporter = CLIReporter(
-            metric_columns=["val_r2", "val_loss", "val_mae", "epoch"],
-            max_report_frequency=30
-        )
+
+    reporter = CLIReporter(
+        metric_columns=["val_r2", "val_loss", "val_mae", "epoch"],
+        max_report_frequency=30
+    )
     
     # Configure run
     outputs_dir = os.path.abspath("../outputs/ray_results")
@@ -308,19 +227,18 @@ def main(cfg: DictConfig):
     )
     
     # Determine optimization target
-    optimization_target = "directional" if choice == "1" else "r2"
     
     print(f"\n🚀 Starting hyperparameter search:")
     print(f"   - Search space size: {len(search_space)} parameters")
     print(f"   - Target metric: {metric}")
-    print(f"   - Optimization target: {optimization_target}")
+    print(f"   - Optimization target: {"mae" if metric == "val_mae" else "r2"}")
     print(f"   - Number of trials: {num_samples}")
     print(f"   - Max concurrent: {max_concurrent}")
     print(f"   - Results will be saved to: {outputs_dir}")
     
     # Run hyperparameter search
     tuner = tune.Tuner(
-        tune.with_parameters(train_model, base_cfg=cfg, optimization_target=optimization_target),
+        tune.with_parameters(train_model, base_cfg=cfg, optimization_target="val_mae" if metric == "val_mae" else "val_r2"),
         param_space=search_space,
         tune_config=tune.TuneConfig(
             search_alg=search_alg,
@@ -453,7 +371,7 @@ def train_final_model(cfg: DictConfig):
     print(f"Final test R2: {test_results[0]['test_r2']:.6f}")
     print(f"Final test loss: {test_results[0]['test_loss']:.6f}")
     print(f"Final test MAE: {test_results[0]['test_mae']:.6f}")
-    print(f"Final test direction accuracy: {test_results[0]['test_direction_acc']:.6f}")
+
     
     return trainer, model
     

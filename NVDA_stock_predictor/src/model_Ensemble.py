@@ -152,208 +152,6 @@ class RidgeRegressor(nn.Module):
             
         return predictions
 
-
-class SklearnWrapper(nn.Module):
-    """Simple wrapper to make sklearn estimators work with skorch"""
-    def __init__(self, estimator):
-        super().__init__()
-        self.estimator = estimator
-        
-    def forward(self, x):
-        # This won't be used, but required for nn.Module
-        return x
-
-
-class DirectionalClassifier(nn.Module):
-    def __init__(self, cfg: DictConfig):
-        super().__init__()
-        self.cfg = cfg
-        self.device = None
-        self.is_fitted = False
-        
-        GBEstimator = GradientBoostingClassifier(
-            n_estimators=cfg.classifiers.numEstimators,
-            learning_rate=cfg.classifiers.learningRate,
-            max_depth=cfg.classifiers.maxDepth,
-            subsample=cfg.classifiers.subSample,
-            min_samples_split=cfg.classifiers.minSamplesSplit,
-            min_samples_leaf=cfg.classifiers.minSamplesLeaf,
-            random_state=cfg.classifiers.randomState
-        )
-        
-        SVMEstimator = SVC(
-            C=cfg.classifiers.C,
-            kernel=cfg.classifiers.kernel,
-            probability=cfg.classifiers.probability,
-            class_weight=cfg.classifiers.classWeight,
-            random_state=cfg.classifiers.randomState
-        )
-        
-        LogisticEstimator = LogisticRegression(
-            C=cfg.classifiers.C,
-            solver=cfg.classifiers.solver,
-            class_weight=cfg.classifiers.classWeight,
-            max_iter=cfg.classifiers.maxIterations,
-            random_state=cfg.classifiers.randomState
-        )
-        
-        RFEstimator = RandomForestClassifier(
-            n_estimators=cfg.classifiers.numEstimators,
-            max_depth=cfg.classifiers.maxDepth,
-            min_samples_split=cfg.classifiers.minSamplesSplit,
-            min_samples_leaf=cfg.classifiers.minSamplesLeaf,
-            max_features=cfg.classifiers.maxFeatures,
-            class_weight=cfg.classifiers.classWeight,
-            random_state=cfg.classifiers.randomState
-        )
-        
-        # Wrap with skorch for tensor compatibility
-        self.gbClassifier = NeuralNetClassifier(
-            SklearnWrapper,
-            module__estimator=GBEstimator,
-            train_split=None,
-            verbose=cfg.classifiers.verbose,
-            max_epochs=cfg.classifiers.MAXEPOCHS,
-        )
-        
-        self.svmClassifier = NeuralNetClassifier(
-            SklearnWrapper,
-            module__estimator=SVMEstimator,
-            train_split=None,
-            verbose=cfg.classifiers.verbose,
-            max_epochs=cfg.classifiers.MAXEPOCHS,
-        )
-        
-        self.logisticClassifier = NeuralNetClassifier(
-            SklearnWrapper,
-            module__estimator=LogisticEstimator,
-            train_split=None,
-            verbose=cfg.classifiers.verbose,
-            max_epochs=cfg.classifiers.MAXEPOCHS,
-        )
-        
-        self.randomForest = NeuralNetClassifier(
-            SklearnWrapper,
-            module__estimator=RFEstimator,
-            train_split=None,
-            verbose=cfg.classifiers.verbose,
-            max_epochs=cfg.classifiers.MAXEPOCHS,
-        )
-        
-        # Store estimators for direct access
-        self.gb_est = GBEstimator
-        self.svm_est = SVMEstimator
-        self.logistic_est = LogisticEstimator
-        self.rf_est = RFEstimator
-        
-        # Ensemble weights (4 models: GB, RF, Logistic, SVM)
-        self.gb_weight = cfg.classifiers.GBWEIGHT
-        self.rf_weight = cfg.classifiers.RFWEIGHT
-        self.logistic_weight = cfg.classifiers.LOGISTICWEIGHT
-        self.svm_weight = cfg.classifiers.SVMWEIGHT
-        
-    def fit(self, X, y):
-        """
-        Fit all classifiers (staying in tensor space as much as possible)
-        
-        Args:
-            X: Features (torch.Tensor) - already scaled
-            y: Target labels (torch.Tensor) 
-        """
-        self.device = X.device
-        
-        # Flatten if 3D
-        if len(X.shape) == 3:
-            XFlat = X.view(X.shape[0], -1)
-        else:
-            XFlat = X
-        
-        # Only convert to numpy when needed for sklearn estimators
-        XNumpy = XFlat.cpu().detach().numpy()
-        YNumpy = y.cpu().detach().numpy()
-        
-        # Fit sklearn estimators directly
-        print("Fitting Gradient Boosting classifier...")
-        self.gb_est.fit(XNumpy, YNumpy)
-        
-        print("Fitting SVM classifier...")
-        self.svm_est.fit(XNumpy, YNumpy)
-        
-        print("Fitting Logistic Regression classifier...")
-        self.logistic_est.fit(XNumpy, YNumpy)
-        
-        print("Fitting Random Forest classifier...")
-        self.rf_est.fit(XNumpy, YNumpy)
-        
-        self.is_fitted = True
-        return self
-        
-    def predict_proba(self, X):
-        """
-        Predict class probabilities using ensemble (return tensors)
-        
-        Args:
-            X: Features (torch.Tensor) - already scaled
-            
-        Returns:
-            Ensemble probabilities as torch.Tensor
-        """
-        if not self.is_fitted:
-            raise RuntimeError("DirectionalClassifier must be fitted before prediction")
-        
-        # Flatten if 3D
-        if len(X.shape) == 3:
-            XFlat = X.view(X.shape[0], -1)
-        else:
-            XFlat = X
-        
-        # Convert to numpy for sklearn prediction
-        XNumpy = XFlat.cpu().detach().numpy()
-        
-        # Get probabilities and convert to tensors
-        gb_proba = torch.tensor(self.gb_est.predict_proba(XNumpy), device=X.device, dtype=torch.float32)
-        svm_proba = torch.tensor(self.svm_est.predict_proba(XNumpy), device=X.device, dtype=torch.float32)
-        logistic_proba = torch.tensor(self.logistic_est.predict_proba(XNumpy), device=X.device, dtype=torch.float32)
-        rf_proba = torch.tensor(self.rf_est.predict_proba(XNumpy), device=X.device, dtype=torch.float32)
-        
-        # Ensemble probabilities (4-model ensemble: GB 30%, RF 30%, Logistic 20%, SVM 20%)
-        ensemble_proba = (self.gb_weight * gb_proba + 
-                         self.rf_weight * rf_proba +
-                         self.logistic_weight * logistic_proba + 
-                         self.svm_weight * svm_proba)
-        
-        return ensemble_proba
-        
-    def predict(self, X):
-        """
-        Predict classes using ensemble
-        
-        Args:
-            X: Features (torch.Tensor)
-            
-        Returns:
-            Predictions as torch.Tensor
-        """
-        proba = self.predict_proba(X)
-        if isinstance(proba, torch.Tensor):
-            return torch.argmax(proba, dim=1)
-        else:
-            return proba.argmax(axis=1)
-        
-    def forward(self, x):
-        """
-        Forward pass for PyTorch compatibility
-        
-        Args:
-            x: Input tensor
-            
-        Returns:
-            Predictions as torch.Tensor
-        """
-        return self.predict_proba(x)
-
-
-
 class EnsembleModule(L.LightningModule):
     """
     Champion CNN-Ridge Ensemble Lightning Module
@@ -370,9 +168,6 @@ class EnsembleModule(L.LightningModule):
         # Ridge component as nn.Module
         self.ridge = RidgeRegressor(cfg)
         
-        # Directional classifier component
-        self.direction_classifier = DirectionalClassifier(cfg)
-        
         # Ensemble weights (optimized from your champion model)
         self.cnnWeight = cfg.model.cnnWeight
         self.ridgeWeight = cfg.model.ridgeWeight
@@ -388,18 +183,15 @@ class EnsembleModule(L.LightningModule):
         self.rmse_val = MeanSquaredError()
         self.r2_val = R2Score()
         
-        # Directional accuracy metrics
-        self.direction_accuracy_train = Accuracy(task='binary')
-        self.direction_accuracy_val = Accuracy(task='binary')
+
         
         # Flags to track if models have been fitted
         self.ridge_fitted = False
-        self.direction_fitted = False
     
     def on_train_start(self):
-        """Fit Ridge regressor and DirectionalClassifier on all training data at the start of training"""
-        if not self.ridge_fitted or not self.direction_fitted:
-            print("Fitting Ridge regressor and DirectionalClassifier on all training data...")
+        """Fit Ridge regressor on all training data at the start of training"""
+        if not self.ridge_fitted:
+            print("Fitting Ridge regressor on all training data...")
             
             # Collect all training data
             allXValues = []
@@ -431,10 +223,6 @@ class EnsembleModule(L.LightningModule):
                 self.fit_ridge_on_batch(XTrain, yTrain)
                 print(f"Ridge regressor fitted on {len(yTrain)} samples!")
             
-            # Fit DirectionalClassifier
-            if not self.direction_fitted:
-                self.fit_direction_on_batch(XTrain, yTrain)
-                print(f"DirectionalClassifier fitted on {len(yTrain)} samples!")
             
             # Clear memory
             del allXValues, allYValues, XTrain, yTrain
@@ -451,21 +239,6 @@ class EnsembleModule(L.LightningModule):
         self.ridge.fit(X, y)
         self.ridge_fitted = True
     
-    def fit_direction_on_batch(self, x, y):
-        """Fit DirectionalClassifier on a batch of data with binary direction targets"""
-        yPrevious = torch.cat([y[:1], y[:-1]])  # Shift by 1, duplicate first element
-        deltaY = y - yPrevious  # Current price - previous price
-
-        # Create binary direction targets based on price CHANGES (1 for up, 0 for down/flat)
-        yDirection = (deltaY > 0).int()
-
-        print(f"Direction targets - Positive changes: {(deltaY > 0).sum()}/{len(deltaY)} ({(deltaY > 0).float().mean()*100:.1f}%)")
-        print(f"Direction targets - Negative changes: {(deltaY < 0).sum()}/{len(deltaY)} ({(deltaY < 0).float().mean()*100:.1f}%)")
-        print(f"Direction targets - Zero changes: {(deltaY == 0).sum()}/{len(deltaY)} ({(deltaY == 0).float().mean()*100:.1f}%)")
-
-        # Fit the DirectionalClassifier with tensors
-        self.direction_classifier.fit(x, yDirection)
-        self.direction_fitted = True
     
     def forward(self, x):
         """
@@ -524,18 +297,6 @@ class EnsembleModule(L.LightningModule):
         self.rmse_train.update(y_hat, y)
         self.r2_train.update(y_hat, y)
         
-        # Update direction accuracy if direction classifier is fitted
-        if self.direction_fitted:
-            # Get direction predictions (staying in tensor space)
-            directionPrediction = self.direction_classifier.predict(x)
-
-            yPrevious = torch.cat([y[:1], y[:-1]])  # Previous day's price
-            deltaY = y - yPrevious  # Price change
-            directionTrue = (deltaY > 0).int()  # 1 for up, 0 for down/flat
-
-            # Update direction accuracy
-            self.direction_accuracy_train.update(directionPrediction, directionTrue)
-
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
     
@@ -551,19 +312,6 @@ class EnsembleModule(L.LightningModule):
         self.rmse_val.update(y_hat, y)
         self.r2_val.update(y_hat, y)
         
-        # Update direction accuracy if direction classifier is fitted
-        if self.direction_fitted:
-            # Get direction predictions (staying in tensor space)
-            directionPrediction = self.direction_classifier.predict(x)
-            
-            # CRITICAL FIX: Compute actual price changes for true direction
-            yPrevious = torch.cat([y[:1], y[:-1]])  # Previous day's price
-            deltaY = y - yPrevious  # Price change
-            directionTrue = (deltaY > 0).int()  # 1 for up, 0 for down/flat
-
-            # Update direction accuracy
-            self.direction_accuracy_val.update(directionPrediction, directionTrue)
-
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
         return loss
     
@@ -571,51 +319,42 @@ class EnsembleModule(L.LightningModule):
         avg_mae = self.mae_train.compute()
         avg_rmse = torch.sqrt(self.rmse_train.compute())
         avg_r2 = self.r2_train.compute()
-        avg_direction_acc = self.direction_accuracy_train.compute()
         
         self.log('train_mae', avg_mae, prog_bar=True)
         self.log('train_rmse', avg_rmse, prog_bar=True)
         self.log('train_r2', avg_r2, prog_bar=True)
-        self.log('train_direction_acc', avg_direction_acc, prog_bar=True)
         
         print(f"\n --------- Training Results ---------")
         print(f"MAE: {avg_mae:.4f}")
         print(f"RMSE: {avg_rmse:.4f}")
         print(f"R2: {avg_r2:.4f}")
-        print(f"Direction Accuracy: {avg_direction_acc:.4f}")
         print(f"Ridge Fitted: {self.ridge_fitted}")
-        print(f"Direction Fitted: {self.direction_fitted}")
         print(f"--------- Training Complete ---------\n")
         
         # Reset metrics for next epoch
         self.mae_train.reset()
         self.rmse_train.reset()
         self.r2_train.reset()
-        self.direction_accuracy_train.reset()
         
     def on_validation_epoch_end(self):
         avg_mae = self.mae_val.compute()
         avg_rmse = torch.sqrt(self.rmse_val.compute())
         avg_r2 = self.r2_val.compute()
-        avg_direction_acc = self.direction_accuracy_val.compute()
         
         self.log('val_mae', avg_mae, prog_bar=True)
         self.log('val_rmse', avg_rmse, prog_bar=True)
         self.log('val_r2', avg_r2, prog_bar=True)
-        self.log('val_direction_acc', avg_direction_acc, prog_bar=True)
         
         print(f"\n --------- Validation Results ---------")
         print(f"MAE: {avg_mae:.4f}")
         print(f"RMSE: {avg_rmse:.4f}")
         print(f"R2: {avg_r2:.4f}")
-        print(f"Direction Accuracy: {avg_direction_acc:.4f}")
         print(f"--------- Validation Complete ---------\n")
         
         # Reset metrics for next epoch
         self.mae_val.reset()
         self.rmse_val.reset()
         self.r2_val.reset()
-        self.direction_accuracy_val.reset()
     
     def test_step(self, batch, batch_idx):
         """Test step for final evaluation"""
@@ -630,19 +369,6 @@ class EnsembleModule(L.LightningModule):
         self.rmse_val.update(y_hat, y)
         self.r2_val.update(y_hat, y)
         
-        # Update direction accuracy if direction classifier is fitted
-        if self.direction_fitted:
-            # Get direction predictions
-            directionPrediction = self.direction_classifier.predict(x)
-            
-            # Compute actual price changes for true direction
-            yPrevious = torch.cat([y[:1], y[:-1]])  # Previous day's price
-            deltaY = y - yPrevious  # Price change
-            directionTrue = (deltaY > 0).int()  # 1 for up, 0 for down/flat
-
-            # Update direction accuracy
-            self.direction_accuracy_val.update(directionPrediction, directionTrue)
-
         self.log('test_loss', loss, on_step=False, on_epoch=True)
         return loss
     
@@ -651,25 +377,21 @@ class EnsembleModule(L.LightningModule):
         avg_mae = self.mae_val.compute()
         avg_rmse = torch.sqrt(self.rmse_val.compute())
         avg_r2 = self.r2_val.compute()
-        avg_direction_acc = self.direction_accuracy_val.compute()
         
         self.log('test_mae', avg_mae)
         self.log('test_rmse', avg_rmse)
         self.log('test_r2', avg_r2)
-        self.log('test_direction_acc', avg_direction_acc)
         
         print(f"\n ============ TEST RESULTS ============")
         print(f"Test MAE: {avg_mae:.6f}")
         print(f"Test RMSE: {avg_rmse:.6f}")
         print(f"Test R²: {avg_r2:.6f}")
-        print(f"Test Direction Accuracy: {avg_direction_acc:.6f}")
         print(f"=====================================\n")
         
         # Reset metrics
         self.mae_val.reset()
         self.rmse_val.reset()
         self.r2_val.reset()
-        self.direction_accuracy_val.reset()
     
     def save_components(self):
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
