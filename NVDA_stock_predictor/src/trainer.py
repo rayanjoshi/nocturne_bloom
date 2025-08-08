@@ -10,11 +10,11 @@ from data_module import StockDataModule
 
 
 checkpoint_callback = ModelCheckpoint(
-    monitor="val_r2",
+    monitor="val_mae",
     dirpath="../models",
-    filename="model-{epoch:02d}-{val_r2:.2f}",
-    save_top_k=3,
-    mode="max",
+    filename="model-{epoch:02d}-{val_mae:.2f}",
+    save_top_k=1,
+    mode="min",
 )
 
 @hydra.main(version_base=None, config_path="../configs", config_name="trainer")
