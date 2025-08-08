@@ -6,6 +6,8 @@ import numpy as np
 import joblib
 import torch
 import backtrader as bt
+import quantstats as qs
+
 
 from data_loader import load_data
 from feature_engineering import feature_engineering
@@ -205,8 +207,29 @@ class TradingSimulation:
         cerebro.broker.setcommission(commission=0.001)
 
         print(f"Starting Portfolio Value: {cerebro.broker.getvalue():.2f}")
-        cerebro.run()
+        # Track portfolio value after each bar
+        portfolio_values = []
+        class ValueTracker(bt.Analyzer):
+            def __init__(self):
+                self.values = []
+            def next(self):
+                self.values.append(self.strategy.broker.getvalue())
+        cerebro.addanalyzer(ValueTracker, _name='valtracker')
+        results = cerebro.run()
         print(f"Ending Portfolio Value: {cerebro.broker.getvalue():.2f}")
+
+        # Get portfolio values from analyzer
+        valtracker = results[0].analyzers.valtracker
+        portfolio_values = valtracker.values
+        if len(portfolio_values) > 1:
+            # Calculate daily returns
+            returns = pd.Series(portfolio_values).pct_change().dropna()
+            sharpe = qs.stats.sharpe(returns)
+            print(f"QuantStats Sharpe Ratio: {sharpe:.4f}")
+
+            # ...removed matplotlib and seaborn plotting code...
+        else:
+            print("Not enough data to calculate Sharpe ratio.")
 
 class StrategySimulation(bt.Strategy):
     params = dict(threshold=0.01, size=100)
