@@ -7,7 +7,7 @@ from omegaconf import DictConfig
 def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save_name):
     db = wrds.Connection(wrds_username=cfg.data_loader.WRDS_USERNAME)
 
-    print(db.list_libraries())  # prints accessible data sets
+    # print(db.list_libraries())  # prints accessible data sets
 
     sql_path = Path(__file__).parent / cfg.data_loader.sql_save_path.lstrip('../')
     with open(sql_path, 'r') as file:
