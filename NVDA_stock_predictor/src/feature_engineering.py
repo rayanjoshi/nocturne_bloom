@@ -46,6 +46,8 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['commodityChannelIndex'] = CCI.cci()
     
     dataFrame['price_acceleration'] = dataFrame['Close'].pct_change(5) - dataFrame['Close'].pct_change(10)
+    
+    dataFrame['volume_surge'] = dataFrame['Volume'] / dataFrame['Volume'].rolling(20).mean()
     dataFrame['volume_momentum'] = dataFrame['volume_surge'].diff(3)
     
     # Multi-timeframe momentum
@@ -77,7 +79,7 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     
     dataFrame['vix_normalized'] = (dataFrame['VIX_Proxy'] - dataFrame['VIX_Proxy'].rolling(126).mean()) / dataFrame['VIX_Proxy'].rolling(126).std()  # Reduced from 252
     dataFrame['vix_regime'] = (dataFrame['VIX_Proxy'] > dataFrame['VIX_Proxy'].rolling(126).quantile(0.75)).astype(int)
-    dataFrame['vol_divergence'] = dataFrame['rolling_vol_21'] - (dataFrame['VIX_Proxy'] / 100)  # Normalize VIX to comparable scale
+
     
     # --------- Volume Indicators --------- #
     dataFrame['volumeChange'] = dataFrame['Volume'].diff()
@@ -101,7 +103,8 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['vol_percentile_5d'] = dataFrame['rolling_vol_5'].rolling(63).rank(pct=True)
     dataFrame['regime_high_vol'] = (dataFrame['vol_percentile_21d'] > 0.8).astype(int)
     
-    dataFrame['volume_surge'] = dataFrame['Volume'] / dataFrame['Volume'].rolling(20).mean()
+    dataFrame['vol_divergence'] = dataFrame['rolling_vol_21'] - (dataFrame['VIX_Proxy'] / 100)  # Normalize VIX to comparable scale
+    
     dataFrame['volume_vol'] = dataFrame['Volume'].rolling(20).std() / dataFrame['Volume'].rolling(20).mean()
     dataFrame['volume_price_trend'] = dataFrame['Volume'].rolling(5).corr(dataFrame['Close'])
     
