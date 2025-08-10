@@ -199,10 +199,6 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     print("Feature engineering complete - no scaling applied")
     print("Scaling will be performed in data_module.py after train/val split to avoid data leakage")
     
-    # Convert relative paths to absolute paths within the repository
-    script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-    repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-    
     # Save processed data
     save_data_path.parent.mkdir(parents=True, exist_ok=True)
     dataFrame.to_csv(save_data_path, index=True)
