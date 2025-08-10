@@ -22,29 +22,6 @@ cnn:
 Ridge:
   alpha: 0.1996926370318278  # Regularization strength for Ridge regression, can be adjusted based on the dataset
 
-classifiers:
-  numEstimators: 100
-  learningRate: 2.5093821312798074e-05
-  maxDepth: 10
-  minSamplesSplit: 5
-  minSamplesLeaf: 10
-  subSample: 0.5155378717861159
-  randomState: 42
-  maxFeatures: 'sqrt'
-  classWeight: 'balanced'
-  C: 5
-  solver: 'liblinear'
-  maxIterations: 500
-  kernel: 'rbf'
-  probability: True
-  verbose: 0
-  MAXEPOCHS: 1
-
-  GBWEIGHT: 0.27053738995027
-  RFWEIGHT: 0.3019947415106128
-  LOGISTICWEIGHT: 0.13929721635149966
-  SVMWEIGHT: 0.28089454454114704
-
 optimiser:
   name: 'adam'
   lr: 5.157286446775219e-05
