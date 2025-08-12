@@ -7,9 +7,17 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 import numpy as np
+import sys
+
+script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
+repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
+scripts_path = repo_root / "scripts"
+sys.path.append(str(scripts_path))
+from logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
-    print("Starting feature engineering...")
+    logger = log_function_start("feature_engineering",dataFrame=dataFrame, save_data_path=save_data_path)
+    logger.info("Starting feature engineering...")
     
     for col in ['Close','Open', 'High', 'Low', 'Volume', 'PB_Ratio', 'PE_Ratio', 'SPY_Close', 'QQQ_Close', 'SOXX_Close', 'VIX_Proxy', 'Treasury_10Y']:
         if col in dataFrame.columns:
@@ -21,11 +29,15 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     # -------- Momentum/ Trend Indicators -------- #
     rsi = RSIIndicator(close=dataFrame['Close'], window=14)
     dataFrame['RSI'] = rsi.rsi()
+    logger.debug("Created 'RSI' with mean: %.2f, std: %.2f", dataFrame['RSI'].mean(), dataFrame['RSI'].std())
     dataFrame['rsi_momentum'] = dataFrame['RSI'].diff(5)
     
     macd = MACD(close=dataFrame['Close'])
     dataFrame['MACD'] = macd.macd()
     dataFrame['MACDSignal'] = macd.macd_signal()
+    logger.debug("Created MACD features: MACD range [%.2f, %.2f], MACDSignal range [%.2f, %.2f]",
+                    dataFrame['MACD'].min(), dataFrame['MACD'].max(),
+                    dataFrame['MACDSignal'].min(), dataFrame['MACDSignal'].max())
     
     dataFrame['SMA_20'] = dataFrame['Close'].rolling(window=20).mean()
     dataFrame['SMA_50'] = dataFrame['Close'].rolling(window=50).mean()
@@ -62,6 +74,8 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     bb = BollingerBands(close=dataFrame['Close'], window=20, window_dev=2)
     dataFrame['BBHigh'] = bb.bollinger_hband()
     dataFrame['BBLow'] = bb.bollinger_lband()
+    logger.debug("Created Bollinger Bands: BBHigh mean %.2f, BBLow mean %.2f",
+                    dataFrame['BBHigh'].mean(), dataFrame['BBLow'].mean())
     
     dataFrame['priceChange'] = dataFrame['Close'].diff()
     dataFrame['closeChangePercentage'] = dataFrame['Close'].pct_change()
@@ -87,16 +101,24 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     
     obv = OnBalanceVolumeIndicator(close=dataFrame['Close'], volume=dataFrame['Volume'])
     dataFrame['onBalanceVolume'] = obv.on_balance_volume()
-    
+    logger.debug("Created 'onBalanceVolume' with mean: %.2f, std: %.2f",
+                    dataFrame['onBalanceVolume'].mean(), dataFrame['onBalanceVolume'].std())
+
     cmf = ChaikinMoneyFlowIndicator(high=dataFrame['High'], low=dataFrame['Low'], close=dataFrame['Close'], volume=dataFrame['Volume'], window=20)
     dataFrame['chaikinMoneyFlow'] = cmf.chaikin_money_flow()
-    
+    logger.debug("Created 'chaikinMoneyFlow' with mean: %.2f, std: %.2f",
+                    dataFrame['chaikinMoneyFlow'].mean(), dataFrame['chaikinMoneyFlow'].std())
+
     fi = ForceIndexIndicator(close=dataFrame['Close'], volume=dataFrame['Volume'], window=20)
     dataFrame['forceIndex'] = fi.force_index()
-    
+    logger.debug("Created 'forceIndex' with mean: %.2f, std: %.2f",
+                    dataFrame['forceIndex'].mean(), dataFrame['forceIndex'].std())
+
     nvi = NegativeVolumeIndexIndicator(close=dataFrame['Close'], volume=dataFrame['Volume'])
     dataFrame['negativeVolumeIndex'] = nvi.negative_volume_index()
-    
+    logger.debug("Created 'negativeVolumeIndex' with mean: %.2f, std: %.2f",
+                    dataFrame['negativeVolumeIndex'].mean(), dataFrame['negativeVolumeIndex'].std())
+
     dataFrame['rolling_vol_5'] = dataFrame['Close'].pct_change().rolling(5).std()
     dataFrame['rolling_vol_21'] = dataFrame['Close'].pct_change().rolling(21).std()
     dataFrame['vol_percentile_21d'] = dataFrame['rolling_vol_21'].rolling(126).rank(pct=True)  # Reduced from 252 to 126 (6 months)
@@ -120,7 +142,9 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['Body'] = dataFrame['Close'] - dataFrame['Open']
     dataFrame['upperWick'] = dataFrame['High'] - dataFrame[['Close', 'Open']].max(axis=1)
     dataFrame['lowerWick'] = dataFrame[['Close', 'Open']].min(axis=1) - dataFrame['Low']
-    
+    logger.debug("Created candle features: Body mean %.2f, upperWick mean %.2f, lowerWick mean %.2f",
+                    dataFrame['Body'].mean(), dataFrame['upperWick'].mean(), dataFrame['lowerWick'].mean())
+
     # --------- Statistical Indicators --------- #
     dataFrame['sigma'] = dataFrame['Close'].rolling(window=20).std()
     dataFrame['beta'] = dataFrame['Close'].rolling(window=20).cov(dataFrame['Volume']) / dataFrame['Volume'].rolling(window=20).var()   
@@ -159,17 +183,29 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
         dataFrame['tech_leadership'] * 
         dataFrame['semiconductor_strength']
     )
+    logger.debug("Created 'ai_momentum_strength' with range: [%.2f, %.2f]", 
+                    dataFrame['ai_momentum_strength'].min(), 
+                    dataFrame['ai_momentum_strength'].max()
+                    )
     
     dataFrame['momentum_acceleration'] = (
         dataFrame['ai_momentum_strength'].diff(1) + 
         dataFrame['ai_momentum_strength'].diff(2)
     ) / 2
-    
+    logger.debug("Created 'momentum_acceleration' with mean: %.2f, std: %.2f",
+                    dataFrame['momentum_acceleration'].mean(),
+                    dataFrame['momentum_acceleration'].std()
+                    )
+
     dataFrame['confirmed_momentum'] = (
         dataFrame['ai_momentum_strength'] * 
         (dataFrame['volume_surge'] > 1).astype(float)
     )
-    
+    logger.debug("Created 'confirmed_momentum' with mean: %.2f, std: %.2f",
+                    dataFrame['confirmed_momentum'].mean(),
+                    dataFrame['confirmed_momentum'].std()
+                    )
+
     # --------- Cross-Asset Correlations --------- #
     dataFrame['vix_spread'] = dataFrame['VIX_Proxy'] - dataFrame['VIX_Proxy'].rolling(20).mean()
     dataFrame['spy_nvda_correlation'] = dataFrame['Close'].pct_change().rolling(20).corr(dataFrame['SPY_Close'].pct_change())
@@ -199,37 +235,39 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame.dropna(inplace=True)  # Drop NaN values after shifting target
     
     # No scaling here - will be done in data_module.py after temporal split
-    print("Feature engineering complete - no scaling applied")
-    print("Scaling will be performed in data_module.py after train/val split to avoid data leakage")
-    
+    logger.info("Feature engineering complete - no scaling applied")
+    logger.info("Scaling will be performed in data_module.py after train/val split to avoid data leakage")
+
     # Save processed data
     save_data_path.parent.mkdir(parents=True, exist_ok=True)
     dataFrame.to_csv(save_data_path, index=True)
 
-    print(f"Processed data saved to {save_data_path.absolute()}")
-    print("--------- Feature Engineering Statistics ---------")
-    print(f"Total features created: {len(dataFrame.columns)}")
-    print(f"Dataset shape: {dataFrame.shape}")
-    print(f"Features will be scaled in data_module.py after train/val split")
-    print(f"All features: {list(dataFrame.columns)}")
-    print("--------- Feature Engineering Completed ---------")
-
+    logger.info(f"Processed data saved to {save_data_path.absolute()}")
+    logger.info("--------- Feature Engineering Statistics ---------")
+    logger.info(f"Total features created: {len(dataFrame.columns)}")
+    logger.info(f"Dataset shape: {dataFrame.shape}")
+    logger.info(f"Features will be scaled in data_module.py after train/val split")
+    logger.info(f"All features: {list(dataFrame.columns)}")
+    logger.info("--------- Feature Engineering Completed ---------")
+    log_function_end("feature_engineering", dataFrame=dataFrame, save_data_path=save_data_path)
     return dataFrame
 
 @hydra.main(version_base=None, config_path="../configs", config_name="feature_engineering")
 def main(cfg: DictConfig):
     try:
+        setup_logging(log_level="INFO", console_output=True, file_output=True)
+        logger = get_logger("main")
         # Convert relative path to absolute path within the repository
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
         raw_data_path = repo_root / cfg.data_loader.raw_data_path.lstrip('../')
         save_data_path = repo_root / cfg.features.preprocessing_data_path.lstrip('../')
-        
-        print(f"Reading raw data from: {raw_data_path.absolute()}")
+
+        logger.info(f"Reading raw data from: {raw_data_path.absolute()}")
         dataFrame = pd.read_csv(raw_data_path, header=0, index_col=0, parse_dates=True)
         feature_engineering(dataFrame, cfg, save_data_path)
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
         raise
 if __name__ == "__main__":
     main()
