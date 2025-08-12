@@ -3,13 +3,26 @@ import pandas as pd
 from pathlib import Path
 import hydra
 from omegaconf import DictConfig
+import sys
+
+script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
+repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
+scripts_path = repo_root / "scripts"
+sys.path.append(str(scripts_path))
+from logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save_name):
+    logger = log_function_start("load_data", 
+                            ticker=ticker, permno=permno, gvkey=gvkey,
+                            start_date=start_date, end_date=end_date, save_name=save_name)
+    
+    logger.info("Loading data from WRDS...")
     db = wrds.Connection(wrds_username=cfg.data_loader.WRDS_USERNAME)
-
+    logger.info("Connected to WRDS successfully.")
     # print(db.list_libraries())  # prints accessible data sets
-
+    
     sql_path = Path(__file__).parent / cfg.data_loader.sql_save_path.lstrip('../')
+    logger.info(f"Reading SQL query from {sql_path}.")
     with open(sql_path, 'r') as file:
         WRDS_query = file.read()
         
@@ -20,11 +33,15 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
         START_DATE=start_date,
         END_DATE=end_date
     )
-
+    logger.info(f"Executing SQL query...")
+    
     dataFrame = db.raw_sql(sql_query)
     if dataFrame.empty:
-        raise ValueError(f"No data found for {ticker} in the specified date range.")
-
+        error_msg = f"No data found for {ticker} in the specified date range."
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    
     # Process the data
     dataFrame['date'] = pd.to_datetime(dataFrame['date'])
     dataFrame.set_index('date', inplace=True)
@@ -49,7 +66,7 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
     dataFrame = dataFrame.drop('permno', axis=1)
     
     # ===== INTELLIGENT IMPUTATION FOR 100% DATA COVERAGE =====
-    print("Applying intelligent imputation for missing market data...")
+    logger.info("Applying intelligent imputation for missing market data...")
     
     # 1. SOXX imputation: Use QQQ as tech proxy when SOXX is missing
     missing_soxx = dataFrame['SOXX_Close'].isna()
@@ -59,7 +76,7 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
         if not available_both.empty:
             soxx_qqq_ratio = (available_both['SOXX_Close'] / available_both['QQQ_Close']).median()
             dataFrame.loc[missing_soxx, 'SOXX_Close'] = dataFrame.loc[missing_soxx, 'QQQ_Close'] * soxx_qqq_ratio
-            print(f"Imputed {missing_soxx.sum()} SOXX values using QQQ proxy (ratio: {soxx_qqq_ratio:.2f})")
+            logger.info(f"Imputed {missing_soxx.sum()} SOXX values using QQQ proxy (ratio: {soxx_qqq_ratio:.2f})")
     
     # 2. VIX Proxy imputation: Calculate rolling volatility from QQQ returns when VIX proxy is missing
     missing_vix = dataFrame['VIX_Proxy'].isna()
@@ -72,12 +89,12 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
         if not available_both_vix.empty:
             vix_scale_factor = (available_both_vix['VIX_Proxy'] / available_both_vix['QQQ_Vol_30d']).median()
             dataFrame.loc[missing_vix, 'VIX_Proxy'] = dataFrame.loc[missing_vix, 'QQQ_Vol_30d'] * vix_scale_factor
-            print(f"Imputed {missing_vix.sum()} VIX values using QQQ volatility (scale factor: {vix_scale_factor:.2f})")
+            logger.info(f"Imputed {missing_vix.sum()} VIX values using QQQ volatility (scale factor: {vix_scale_factor:.2f})")
         else:
             # Fallback: use median VIX value
             median_vix = dataFrame['VIX_Proxy'].median()
             dataFrame.loc[missing_vix, 'VIX_Proxy'] = median_vix
-            print(f"Imputed {missing_vix.sum()} VIX values using median fallback ({median_vix:.2f})")
+            logger.info(f"Imputed {missing_vix.sum()} VIX values using median fallback ({median_vix:.2f})")
         
         # Clean up temporary column
         dataFrame = dataFrame.drop('QQQ_Vol_30d', axis=1)
@@ -85,57 +102,60 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
     # 3. Final check: ensure no missing values remain in key columns
     final_missing = dataFrame[['SPY_Close', 'QQQ_Close', 'SOXX_Close', 'VIX_Proxy', 'Treasury_10Y']].isna().sum()
     if final_missing.any():
-        print("Remaining missing values after imputation:")
-        print(final_missing[final_missing > 0])
+        logger.warning("Remaining missing values after imputation:")
+        logger.warning(final_missing[final_missing > 0])
         
         # Final forward/backward fill for any remaining gaps
         for col in ['SPY_Close', 'QQQ_Close', 'SOXX_Close', 'VIX_Proxy', 'Treasury_10Y']:
             if dataFrame[col].isna().any():
-                dataFrame[col] = dataFrame[col].fillna(method='ffill').fillna(method='bfill')
-                print(f"Applied forward/backward fill to {col}")
+                    dataFrame[col] = dataFrame[col].ffill().bfill()
+                    logger.info(f"Applied forward/backward fill to {col}")
     
-    print("=== Final Data Coverage Check ===")
+    logger.info("=== Final Data Coverage Check ===")
     coverage_check = dataFrame.isna().sum()
     total_missing = coverage_check.sum()
     if total_missing == 0:
-        print("✅ PERFECT: 100% data coverage achieved!")
+        logger.info("PERFECT: 100% data coverage achieved!")
     else:
-        print(f"❌ WARNING: {total_missing} missing values remain")
-        print(coverage_check[coverage_check > 0])
+        logger.warning(f"This amount {total_missing} of missing values remain.")
+        logger.warning(coverage_check[coverage_check > 0])
     
     # Drop QQQ_Return as it was only needed for imputation
     dataFrame = dataFrame.drop('QQQ_Return', axis=1)
-
+    
     # Convert relative path to absolute path within the repository
     script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
     repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
     output_path = repo_root / save_name.lstrip('../')  # Remove leading ../
-
+    
     output_path.parent.mkdir(parents=True, exist_ok=True)
     dataFrame.to_csv(output_path, index=True)
     
-    print(f"Data saved to {output_path.absolute()}")
-    print("--------- Data Loading Statistics ---------")
-    print(f"Total features created: {len(dataFrame.columns)}")
-    print(f"Dataset shape: {dataFrame.shape}")
-    print(f"All features: {list(dataFrame.columns)}")
-    print("--------- Data Loading Completed ---------")
-
+    log_function_end("load_data", success=True,
+                        output_file=str(output_path),
+                        final_shape=dataFrame.shape,
+                        date_range=f"{dataFrame.index.min()} to {dataFrame.index.max()}")
+    
     return dataFrame
 
 @hydra.main(version_base=None, config_path="../configs", config_name="data_loader")
 def main(cfg: DictConfig):
     try:
-        print("The following parameters will be used to load data:")
-        print(f"TICKER: {cfg.data_loader.TICKER}")
-        print(f"PERMNO: {cfg.data_loader.PERMNO}")
-        print(f"GVKEY: {cfg.data_loader.GVKEY}")
-        print(f"START_DATE: {cfg.data_loader.START_DATE}")
-        print(f"END_DATE: {cfg.data_loader.END_DATE}")
-        print(f"SAVE_NAME: {cfg.data_loader.raw_data_path}")
+        setup_logging(log_level="INFO", console_output=True, file_output=True)
+        logger = get_logger("main")
+        logger.info("🚀 Starting NVDA Stock Predictor Data Loader")
+        logger.info(f"Configuration loaded from: data_loader config")
+        
+        # Log configuration parameters (excluding sensitive ones)
+        logger.info("Configuration Parameters:")
+        for key, value in cfg.data_loader.items():
+            if not any(sensitive in key.upper() for sensitive in ['PASSWORD', 'USERNAME', 'TOKEN']):
+                logger.info(f"  {key}: {value}")
         load_data(cfg, cfg.data_loader.TICKER, cfg.data_loader.PERMNO, cfg.data_loader.GVKEY, cfg.data_loader.START_DATE, cfg.data_loader.END_DATE, cfg.data_loader.raw_data_path)
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
+        logger.error("Full traceback:", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
