@@ -3,12 +3,21 @@ from torch import nn
 import torch.nn.functional as F
 from torchmetrics import MeanAbsoluteError, MeanSquaredError
 from torchmetrics.regression import R2Score
-
 import lightning as L
 from omegaconf import DictConfig
 from pathlib import Path
+import sys
+script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
+repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
+scripts_path = repo_root / "scripts"
+sys.path.append(str(scripts_path))
+from logging_config import get_logger, setup_logging
+
+setup_logging(log_level="INFO", console_output=True, file_output=True)
+logger = get_logger("model_Ensemble")
 class CNN(nn.Module):
     def __init__(self, cfg: DictConfig):
+        logger.info("Initializing CNN model with config: %s", cfg.cnn)
         super().__init__()
         inputChannels = cfg.cnn.inputChannels
         cnnChannels = [cfg.cnn.cnnChannels[0], cfg.cnn.cnnChannels[1], cfg.cnn.cnnChannels[2]]
@@ -43,6 +52,7 @@ class CNN(nn.Module):
         )
         
     def forward(self, x):
+        logger.debug("CNN forward pass with input shape: %s", x.shape)
         x = x.transpose(1, 2)
         x = self.cnn(x)
         x = x.squeeze(-1)
@@ -53,6 +63,7 @@ class CNN(nn.Module):
 
 class RidgeRegressor(nn.Module):
     def __init__(self, cfg: DictConfig):
+        logger.info("Initializing RidgeRegressor with alpha=%.4f, fit_intercept=%s", cfg.Ridge.alpha, cfg.Ridge.get('fit_intercept', True))
         super().__init__()
         self.alpha = cfg.Ridge.alpha
         self.fit_intercept = cfg.Ridge.get('fit_intercept', True)
@@ -63,6 +74,7 @@ class RidgeRegressor(nn.Module):
         self.is_fitted = False
         
     def fit(self, X, y):
+        logger.info("Fitting RidgeRegressor on data: X shape %s, y shape %s", X.shape, y.shape)
         """
         Fit Ridge regression using pure PyTorch tensors
         
@@ -121,6 +133,7 @@ class RidgeRegressor(nn.Module):
         self.is_fitted = True
         
     def forward(self, x):
+        logger.debug("RidgeRegressor forward pass with input shape: %s", x.shape)
         """
         Forward pass for Ridge regression using pure tensors
         
@@ -154,6 +167,7 @@ class EnsembleModule(L.LightningModule):
     This combines CNN (10%) + Ridge (90%) in a proper Lightning module
     """
     def __init__(self, cfg: DictConfig):
+        logger.info("Initializing EnsembleModule with config: %s", cfg.model)
         super().__init__()
         self.cfg = cfg
         
@@ -184,6 +198,7 @@ class EnsembleModule(L.LightningModule):
         self.ridge_fitted = False
     
     def on_train_start(self):
+        logger.info("on_train_start: Fitting Ridge regressor on all training data...")
         """Fit Ridge regressor on all training data at the start of training"""
         if not self.ridge_fitted:
             print("Fitting Ridge regressor on all training data...")
@@ -223,6 +238,7 @@ class EnsembleModule(L.LightningModule):
             del allXValues, allYValues, XTrain, yTrain
 
     def fit_ridge_on_batch(self, X, y):
+        logger.info("Fitting Ridge on batch: X shape %s, y shape %s", X.shape, y.shape)
         """
         Fit the Ridge component on a batch of training data
         This can be called during training setup
@@ -236,6 +252,7 @@ class EnsembleModule(L.LightningModule):
     
     
     def forward(self, x):
+        logger.debug("Ensemble forward pass with input shape: %s", x.shape)
         """
         Forward pass combining CNN and Ridge predictions
         
@@ -280,6 +297,7 @@ class EnsembleModule(L.LightningModule):
             return cnnPrediction
 
     def training_step(self, batch, batch_idx):
+        logger.debug("Training step: batch_idx=%d", batch_idx)
         x, y = batch
         y_hat = self(x).squeeze(-1)
         if y_hat.dim() != y.dim():
@@ -296,6 +314,7 @@ class EnsembleModule(L.LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
+        logger.debug("Validation step: batch_idx=%d", batch_idx)
         x, y = batch
         y_hat = self(x).squeeze(-1)
         if y_hat.dim() != y.dim():
@@ -311,6 +330,7 @@ class EnsembleModule(L.LightningModule):
         return loss
     
     def on_train_epoch_end(self):
+        logger.info("Training epoch ended. Computing training metrics.")
         avg_mae = self.mae_train.compute()
         avg_rmse = torch.sqrt(self.rmse_train.compute())
         avg_r2 = self.r2_train.compute()
@@ -332,6 +352,7 @@ class EnsembleModule(L.LightningModule):
         self.r2_train.reset()
         
     def on_validation_epoch_end(self):
+        logger.info("Validation epoch ended. Computing validation metrics.")
         avg_mae = self.mae_val.compute()
         avg_rmse = torch.sqrt(self.rmse_val.compute())
         avg_r2 = self.r2_val.compute()
@@ -352,6 +373,7 @@ class EnsembleModule(L.LightningModule):
         self.r2_val.reset()
     
     def test_step(self, batch, batch_idx):
+        logger.debug("Test step: batch_idx=%d", batch_idx)
         """Test step for final evaluation"""
         x, y = batch
         y_hat = self(x).squeeze(-1)
@@ -368,6 +390,7 @@ class EnsembleModule(L.LightningModule):
         return loss
     
     def on_test_epoch_end(self):
+        logger.info("Test epoch ended. Computing test metrics.")
         """Compute and log test metrics at the end of testing"""
         avg_mae = self.mae_val.compute()
         avg_rmse = torch.sqrt(self.rmse_val.compute())
@@ -389,6 +412,7 @@ class EnsembleModule(L.LightningModule):
         self.r2_val.reset()
     
     def save_components(self):
+        logger.info("Saving CNN and Ridge model components to disk.")
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
         cnnPath = repo_root / self.cfg.model.cnnPath.lstrip('../')
@@ -400,6 +424,7 @@ class EnsembleModule(L.LightningModule):
         print(f"CNN model saved to {cnnPath} and Ridge model saved to {ridgePath}.")
 
     def configure_optimizers(self):
+        logger.info("Configuring optimizers and learning rate scheduler.")
         optimizer = torch.optim.Adam(
             self.parameters(), 
             lr=self.cfg.optimiser.lr, 
