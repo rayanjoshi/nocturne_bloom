@@ -1,0 +1,68 @@
+[project]
+name = "NVDA_stock_prediction"
+version = "1.0.0"
+description = "Predicting NVIDIA (NVDA) stock prices using machine learning techniques."
+authors = [{ name = "Rayan Joshi", email = "rayanjoshi@hotmail.co.uk" }]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+dependencies = [
+    # -------- Core ML and Deep Learning -------- #
+    "lightning",
+    "pytorch-lightning",
+    "torch",
+    "torchvision",
+    "torchmetrics",
+    "scikit-learn",
+    "pandas",
+    "numpy",
+
+    # -------- Data Handling & Visualization -------- #
+    "matplotlib",
+    "seaborn",
+    "plotly",
+
+    # -------- Logging -------- #
+    "wandb",
+
+    # -------- Financial Data -------- #
+    "wrds",
+    "yfinance",
+    "pandas_datareader",
+
+    # -------- Backtesting & Technical Analysis -------- #
+    "backtrader",
+    "pandas-ta",                 # Modern replacement for ta
+
+    # -------- Dashboard -------- #
+    "dash",
+    "dash-bootstrap-components",
+
+    # -------- Hyperparameter Optimization -------- #
+    "ray[tune]",
+    "optuna",
+
+    # -------- Utilities -------- #
+    "hydra-core",
+    "omegaconf",
+    "joblib",
+    "python-dotenv"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0,<8.3",
+    "black>=24.4.2,<25.0",
+    "ruff>=0.4.5,<0.5"
+]
+
+[tool.setuptools]
+package-dir = { "" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
