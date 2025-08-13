@@ -13,10 +13,16 @@ from ray.tune.schedulers import ASHAScheduler, PopulationBasedTraining
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune import CheckpointConfig, RunConfig
 from ray.air.integrations.wandb import WandbLoggerCallback
+import sys
+from pathlib import Path
 
 from model_Ensemble import EnsembleModule
 from data_module import StockDataModule
-
+script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
+repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
+scripts_path = repo_root / "scripts"
+sys.path.append(str(scripts_path))
+from logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def define_search_space_r2():
     """Define search space optimized for R2 score"""
@@ -85,6 +91,7 @@ def define_search_space_r2():
 
 def train_model(config, base_cfg, optimization_target="val_mae"):
     """Training function for Ray Tune"""
+    logger = log_function_start("train_model", optimization_target=optimization_target)
     # Create a copy of base config and update with tune parameters
     cfg = OmegaConf.create(OmegaConf.to_yaml(base_cfg))
     
@@ -107,7 +114,7 @@ def train_model(config, base_cfg, optimization_target="val_mae"):
     with tempfile.TemporaryDirectory() as temp_dir:
         # Configure callbacks
         checkpoint_callback = ModelCheckpoint(
-            monitor="val_mae",
+            monitor=optimization_target,
             dirpath=temp_dir,
             filename="model-{epoch:02d}-{val_mae:.2f}",
             save_top_k=1,
@@ -139,6 +146,7 @@ def train_model(config, base_cfg, optimization_target="val_mae"):
         
         # Initialize model and data
         torch.manual_seed(cfg.trainer.seed)
+        logger.debug("Seed set to %d", cfg.trainer.seed)
         model = EnsembleModule(cfg)
         data_module = StockDataModule(cfg)
         
@@ -149,7 +157,7 @@ def train_model(config, base_cfg, optimization_target="val_mae"):
         val_results = trainer.validate(model, datamodule=data_module, verbose=False)
         
         # Report metrics based on optimization target
-
+        
         metrics = {
             "val_r2": val_results[0]["val_r2"],
             "val_loss": val_results[0]["val_loss"],
@@ -159,23 +167,26 @@ def train_model(config, base_cfg, optimization_target="val_mae"):
         }
         
         tune.report(metrics=metrics)
+    log_function_end("train_model", success=True)
 
 @hydra.main(version_base=None, config_path="../configs", config_name="trainer")
 def main(cfg: DictConfig):
     """Main function with Ray Tune integration"""
-    
+    setup_logging(log_level="INFO", console_output=True, file_output=True)
+    logger = get_logger("main")
     # Initialize Ray
     if not ray.is_initialized():
         ray.init(ignore_reinit_error=True)
     
-    print("=== NVDA Stock Predictor Hyperparameter Optimization ===")
+    logger.info("=== NVDA Stock Predictor Hyperparameter Optimization ===")
     search_space = define_search_space_r2()
+    logger.info("Search space defined with %d parameters", len(search_space))
     metric = "val_mae"
     mode = "min"
     num_samples = 100
     max_concurrent = 5
-    print("\n📈 Optimizing for MAE")
-
+    logger.info("Optimizing for MAE")
+    
     
     # Configure scheduler
     scheduler = ASHAScheduler(
@@ -187,23 +198,27 @@ def main(cfg: DictConfig):
         reduction_factor=2,
         brackets=3
     )
+    logger.debug("Scheduler configured with max epochs %d", cfg.trainer.max_epochs)
     
     # Configure search algorithm
     search_alg = OptunaSearch(
         metric=metric,
         mode=mode,
     )
+    logger.debug("Search algorithm configured with metric %s", metric)
     
     # Configure reporter
-
+    
     reporter = CLIReporter(
         metric_columns=["val_r2", "val_loss", "val_mae", "epoch"],
         max_report_frequency=30
     )
+    logger.debug("Reporter configured with columns: %s", reporter.metric_columns)
     
     # Configure run
     outputs_dir = os.path.abspath("../outputs/ray_results")
     os.makedirs(outputs_dir, exist_ok=True)
+    logger.info("Output directory for results: %s", outputs_dir)
     
     run_config = RunConfig(
         name=f"nvda_tune_{metric}",
@@ -228,13 +243,13 @@ def main(cfg: DictConfig):
     
     # Determine optimization target
     
-    print(f"\n🚀 Starting hyperparameter search:")
-    print(f"   - Search space size: {len(search_space)} parameters")
-    print(f"   - Target metric: {metric}")
-    print(f"   - Optimization target: {"mae" if metric == "val_mae" else "r2"}")
-    print(f"   - Number of trials: {num_samples}")
-    print(f"   - Max concurrent: {max_concurrent}")
-    print(f"   - Results will be saved to: {outputs_dir}")
+    logger.info(f"\n🚀 Starting hyperparameter search:")
+    logger.info(f"   - Search space size: {len(search_space)} parameters")
+    logger.info(f"   - Target metric: {metric}")
+    logger.info(f"   - Optimization target: {"mae" if metric == "val_mae" else "r2"}")
+    logger.info(f"   - Number of trials: {num_samples}")
+    logger.info(f"   - Max concurrent: {max_concurrent}")
+    logger.info(f"   - Results will be saved to: {outputs_dir}")
     
     # Run hyperparameter search
     tuner = tune.Tuner(
@@ -254,18 +269,17 @@ def main(cfg: DictConfig):
     # Get best results
     best_result = results.get_best_result(metric=metric, mode=mode)
     
-    print("\n" + "="*60)
-    print("🏆 OPTIMIZATION COMPLETE!")
-    print("="*60)
-    print(f"Best {metric}: {best_result.metrics[metric]:.6f}")
-    print(f"Best validation loss: {best_result.metrics['val_loss']:.6f}")
-    print(f"Best validation MAE: {best_result.metrics['val_mae']:.6f}")
-    print(f"Training completed at epoch: {best_result.metrics['epoch']}")
-    
-    print("\n🔧 Best hyperparameters:")
-    print("-" * 40)
+    logger.info("\n" + "="*60)
+    logger.info("🏆 OPTIMIZATION COMPLETE!")
+    logger.info("="*60)
+    logger.info(f"Best {metric}: {best_result.metrics[metric]:.6f}")
+    logger.info(f"Best validation loss: {best_result.metrics['val_loss']:.6f}")
+    logger.info(f"Best validation MAE: {best_result.metrics['val_mae']:.6f}")
+    logger.info(f"Training completed at epoch: {best_result.metrics['epoch']}")
+    logger.info("\n🔧 Best hyperparameters:")
+    logger.info("-" * 40)
     for key, value in best_result.config.items():
-        print(f"{key}: {value}")
+        logger.info(f"{key}: {value}")
     
     # Save best configuration
     best_config_path = f"../outputs/best_config_{metric}.yaml"
@@ -286,94 +300,13 @@ def main(cfg: DictConfig):
     
     best_cfg = OmegaConf.create(cfg_dict)
     
-    # Normalize classifier weights
-    total_weight = (best_cfg.classifiers.GBWEIGHT + best_cfg.classifiers.RFWEIGHT + 
-                    best_cfg.classifiers.LOGISTICWEIGHT + best_cfg.classifiers.SVMWEIGHT)
-    best_cfg.classifiers.GBWEIGHT /= total_weight
-    best_cfg.classifiers.RFWEIGHT /= total_weight
-    best_cfg.classifiers.LOGISTICWEIGHT /= total_weight
-    best_cfg.classifiers.SVMWEIGHT /= total_weight
-    
     # Save the configuration
     os.makedirs("../outputs", exist_ok=True)
     OmegaConf.save(best_cfg, best_config_path)
     
-    print(f"\n💾 Best configuration saved to: {best_config_path}")
-    print("\n📊 To train the final model with these parameters:")
-    print(f"   python train_final_model.py --config-path=../outputs --config-name=best_config_{metric}")
-    
-    # Optionally train final model
-    print("\n" + "="*60)
-    train_final = input("Would you like to train the final model now? (y/n): ").strip().lower()
-    
-    if train_final == 'y':
-        print("\n🔥 Training final model with best hyperparameters...")
-        train_final_model(best_cfg)
-    
-    ray.shutdown()
+    logger.info(f"\n💾 Best configuration saved to: {best_config_path}")
+    logger.info("\n📊 To train the final model with these parameters:")
+    logger.info(f"   python train_final_model.py --config-path=../outputs --config-name=best_config_{metric}")
 
-
-def train_final_model(cfg: DictConfig):
-    """Train the final model with best hyperparameters"""
-    
-    # Setup WandB logger for final training
-    wandb_logger = WandbLogger(
-        project=f"{cfg.trainer.project_name}_final",
-        name=f"final_model_{cfg.trainer.run_name}",
-        save_dir="../logs",
-        tags=["final_model", "best_hyperparams"]
-    )
-    
-    # Configure callbacks for final training
-    checkpoint_callback = ModelCheckpoint(
-        monitor="val_r2",
-        dirpath="../models/final",
-        filename="final-model-{epoch:02d}-{val_r2:.2f}",
-        save_top_k=3,
-        mode="max",
-        save_last=True,
-    )
-    
-    early_stopping_callback = EarlyStopping(
-        monitor="val_loss",
-        patience=cfg.trainer.early_stopping_patience,
-        mode="min",
-        min_delta=cfg.trainer.early_stopping_delta,
-    )
-    
-    # Create trainer for final model
-    trainer = Trainer(
-        max_epochs=cfg.trainer.max_epochs,
-        accelerator="auto",
-        devices=1,
-        callbacks=[checkpoint_callback, early_stopping_callback],
-        logger=wandb_logger,
-        log_every_n_steps=cfg.trainer.log_every_n_steps,
-        check_val_every_n_epoch=1,
-        val_check_interval=1.0,
-        deterministic=True,
-        gradient_clip_val=getattr(cfg.trainer, 'gradient_clip_val', 1.0),
-    )
-    
-    # Initialize model and data
-    torch.manual_seed(cfg.trainer.seed)
-    model = EnsembleModule(cfg)
-    data_module = StockDataModule(cfg)
-    
-    # Train the final model
-    print("🚂 Starting final model training...")
-    trainer.fit(model, datamodule=data_module)
-    
-    # Test the final model
-    test_results = trainer.test(model, datamodule=data_module)
-    
-    print("\n🎉 Final model training complete!")
-    print(f"Final test R2: {test_results[0]['test_r2']:.6f}")
-    print(f"Final test loss: {test_results[0]['test_loss']:.6f}")
-    print(f"Final test MAE: {test_results[0]['test_mae']:.6f}")
-
-    
-    return trainer, model
-    
 if __name__ == "__main__":
     main()
