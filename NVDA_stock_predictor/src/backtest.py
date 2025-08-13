@@ -1,5 +1,6 @@
 import pandas as pd
 from pathlib import Path
+import sys
 import hydra
 from omegaconf import DictConfig
 import numpy as np
@@ -13,14 +14,20 @@ from data_loader import load_data
 from feature_engineering import feature_engineering
 from model_Ensemble import EnsembleModule
 
+script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
+repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
+scripts_path = repo_root / "scripts"
+sys.path.append(str(scripts_path))
+from logging_config import get_logger, setup_logging
 
 class DataProcessor:
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
+        self.logger = get_logger("DataProcessor")
 
     def load_data(self):
-        print(f"Loading data for {self.cfg.data_loader.TICKER} from {self.cfg.data_loader.START_DATE} to {self.cfg.data_loader.END_DATE}")
+        self.logger.info(f"Loading data for {self.cfg.data_loader.TICKER} from {self.cfg.data_loader.START_DATE} to {self.cfg.data_loader.END_DATE}")
         load_data(
             self.cfg,
             self.cfg.data_loader.TICKER,
@@ -32,7 +39,7 @@ class DataProcessor:
         )
     
     def engineer_features(self):
-        print(f"Engineering features for {self.cfg.data_loader.TICKER}")
+        self.logger.info(f"Engineering features for {self.cfg.data_loader.TICKER}")
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
         raw_data_path = repo_root / self.cfg.data_loader.raw_data_path.lstrip('../')
@@ -46,7 +53,7 @@ class DataProcessor:
         return feature_engineering(dataFrame, self.cfg, save_data_path)
     
     def data_module(self, dataFrame):
-        print(f"Converting features to tensors for {self.cfg.data_loader.TICKER}")
+        self.logger.info(f"Converting features to tensors for {self.cfg.data_loader.TICKER}")
         window_size = self.cfg.data_module.window_size
         target_col = self.cfg.data_module.target_col
         
@@ -60,11 +67,11 @@ class DataProcessor:
         
         x = np.array(x)
         y = np.array(y)
-        
-        print(f"Created {len(x)} windows with shape {x.shape}")
-        print(f"Target range before scaling: [{y.min():.6f}, {y.max():.6f}]")
-        
-        print("Scaling features and targets...")
+
+        self.logger.info(f"Created {len(x)} windows with shape {x.shape}")
+        self.logger.info(f"Target range before scaling: [{y.min():.6f}, {y.max():.6f}]")
+
+        self.logger.info("Scaling features and targets...")
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
         repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
         getFeatureScaler = repo_root / self.cfg.data_module.feature_scaler_path.lstrip('../')
@@ -74,10 +81,10 @@ class DataProcessor:
         
         scaledX = feature_scaler.transform(x.reshape(-1, x.shape[-1])).reshape(x.shape)
         scaledY = target_scaler.transform(y.reshape(-1, 1)).flatten()
-        
-        print(f"Feature range after scaling: [{scaledX.min():.6f}, {scaledX.max():.6f}]")
-        print(f"Target range after scaling: [{scaledY.min():.6f}, {scaledY.max():.6f}]")
-        
+
+        self.logger.info(f"Feature range after scaling: [{scaledX.min():.6f}, {scaledX.max():.6f}]")
+        self.logger.info(f"Target range after scaling: [{scaledY.min():.6f}, {scaledY.max():.6f}]")
+
         scaledX = torch.tensor(scaledX, dtype=torch.float32)
         scaledY = torch.tensor(scaledY, dtype=torch.float32)
         
@@ -89,6 +96,7 @@ class DataProcessor:
 class MakePredictions:
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
+        self.logger = get_logger("MakePredictions")
 
     def load_model(self):
         script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
@@ -97,7 +105,7 @@ class MakePredictions:
         backtestY = repo_root / self.cfg.data_module.y_scaled_save_path.lstrip('../')
         x = torch.load(backtestX)
         y = torch.load(backtestY)
-        print(f"Loaded {len(x)} samples with shape {x.shape} and target shape {y.shape}")
+        self.logger.info(f"Loaded {len(x)} samples with shape {x.shape} and target shape {y.shape}")
         model = EnsembleModule(self.cfg)
 
         cnnPath = repo_root / self.cfg.model.cnnPath.lstrip('../')
@@ -107,7 +115,9 @@ class MakePredictions:
         ridgePath = repo_root / self.cfg.model.ridgePath.lstrip('../')
         ridge_state_dict = torch.load(ridgePath)
         weightShape = ridge_state_dict['weight'].shape
+        self.logger.info(f"Ridge model weight shape: {weightShape}")
         biasShape = ridge_state_dict['bias'].shape
+        self.logger.info(f"Ridge model bias shape: {biasShape}")
         model.ridge.weight.data = torch.zeros(weightShape, dtype=torch.float32)
         model.ridge.bias.data = torch.zeros(biasShape, dtype=torch.float32)
         model.ridge.load_state_dict(ridge_state_dict)
@@ -128,8 +138,8 @@ class MakePredictions:
                 if pred.dim() > 0:
                     pred = pred.squeeze(-1)
                 predictions.append(pred.item())
-        
-        print(f"Generated {len(predictions)} predictions using CNN+Ridge")
+
+        self.logger.info(f"Generated {len(predictions)} predictions using CNN+Ridge")
         return predictions
     
     def savePredictions(self, predictions):
@@ -146,12 +156,20 @@ class MakePredictions:
         df_eval = pd.read_csv(evaluate_data_path, header=0, index_col=0, parse_dates=True)
         dates = df_eval.index[self.cfg.data_module.window_size:]
         dataFramePredictions.insert(0, 'Time', dates)
+        self.logger.debug(f"Inserted Time column with {len(dates)} entries.")
+
         close_values = df_eval['Close'].values[self.cfg.data_module.window_size:]
+        self.logger.debug(f"Loaded Close values, shape: {close_values.shape}")
+
         dataFramePredictions['Predicted'] = dataFramePredictions['Predicted'].round(3)
         close_values = np.round(close_values, 3)
         dataFramePredictions.insert(2, 'Close', close_values)
+        self.logger.debug("Inserted Close column and rounded Predicted/Close values.")
+
         error = np.abs(dataFramePredictions['Predicted'] - dataFramePredictions['Close'])
         dataFramePredictions.insert(3, 'Error', error.round(3))
+        self.logger.debug("Inserted Error column.")
+
         # Calculate direction: 1 if next value > current, -1 if next < current, 0 if equal
         pred_diff = np.diff(dataFramePredictions['Predicted'])
         close_diff = np.diff(dataFramePredictions['Close'])
@@ -159,15 +177,20 @@ class MakePredictions:
         # Pad with NaN for first row to align length
         direction = np.insert(direction, 0, np.nan)
         dataFramePredictions.insert(4, 'Direction_Match', direction)
+        self.logger.debug("Inserted Direction_Match column.")
+
         save_path = repo_root / self.cfg.backtest.predictions_save_path.lstrip('../')
+        self.logger.debug(f"Predictions will be saved to {save_path}")
         save_path.parent.mkdir(parents=True, exist_ok=True)
         dataFramePredictions.to_csv(save_path, index=False)
-        print(f"Saved predictions with time column to {save_path}")
+        self.logger.info(f"Saved predictions with time column to {save_path}")
 
 
 class TradingSimulation:
     def __init__(self, cfg: DictConfig, predictions):
         self.cfg = cfg
+        self.predictions = predictions
+        self.logger = get_logger("TradingSimulation")
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent
         data_path = repo_root / self.cfg.backtest.predictions_save_path.lstrip('../')
@@ -206,7 +229,7 @@ class TradingSimulation:
         cerebro.broker.setcash(1000000.00)
         cerebro.broker.setcommission(commission=0.001)
 
-        print(f"Starting Portfolio Value: {cerebro.broker.getvalue():.2f}")
+        self.logger.info(f"Starting Portfolio Value: {cerebro.broker.getvalue():.2f}")
         # Track portfolio value after each bar
         portfolio_values = []
         class ValueTracker(bt.Analyzer):
@@ -216,7 +239,7 @@ class TradingSimulation:
                 self.values.append(self.strategy.broker.getvalue())
         cerebro.addanalyzer(ValueTracker, _name='valtracker')
         results = cerebro.run()
-        print(f"Ending Portfolio Value: {cerebro.broker.getvalue():.2f}")
+        self.logger.info(f"Ending Portfolio Value: {cerebro.broker.getvalue():.2f}")
 
         # Get portfolio values from analyzer
         valtracker = results[0].analyzers.valtracker
@@ -225,11 +248,11 @@ class TradingSimulation:
             # Calculate daily returns
             returns = pd.Series(portfolio_values).pct_change().dropna()
             sharpe = qs.stats.sharpe(returns)
-            print(f"QuantStats Sharpe Ratio: {sharpe:.4f}")
+            self.logger.info(f"QuantStats Sharpe Ratio: {sharpe:.4f}")
 
             # ...removed matplotlib and seaborn plotting code...
         else:
-            print("Not enough data to calculate Sharpe ratio.")
+            self.logger.warning("Not enough data to calculate Sharpe ratio.")
 
 class StrategySimulation(bt.Strategy):
     params = dict(threshold=0.01, size=100)
@@ -240,6 +263,7 @@ class StrategySimulation(bt.Strategy):
         self.dates = dates
         self.order = None
         self.data.close = self.datas[0].close
+        self.logger = get_logger("StrategySimulation")
     
     def log(self, txt, dt=None):
         idx = len(self)
@@ -247,8 +271,8 @@ class StrategySimulation(bt.Strategy):
             dt = pd.to_datetime(self.dates[idx]).date()
         else:
             dt = dt or self.datas[0].datetime.date(0)
-        print(f"{dt.isoformat()} {txt}")
-    
+        self.logger.info(f"{dt.isoformat()} {txt}")
+
     def next(self):
         idx = len(self)
         if idx >= len(self.predictions):
@@ -316,6 +340,8 @@ class StrategySimulation(bt.Strategy):
 @hydra.main(version_base=None, config_path="../configs", config_name="backtest")
 def main(cfg: DictConfig):
     try:
+        setup_logging(log_level="DEBUG", console_output=True, file_output=True)
+        logger = get_logger("main")
         data_processor = DataProcessor(cfg)
         data_processor.load_data()
         dataFrame = data_processor.engineer_features()
@@ -326,8 +352,9 @@ def main(cfg: DictConfig):
         make_predictions.savePredictions(predictions)
         backtest = TradingSimulation(cfg, predictions)
         backtest.run()
+        logger.info("Backtest completed successfully.")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
 
 if __name__ == "__main__":
     main()
