@@ -4,12 +4,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 import sys
-
-script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
-repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
-scripts_path = repo_root / "scripts"
-sys.path.append(str(scripts_path))
-from logging_config import get_logger, setup_logging, log_function_start, log_function_end
+from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save_name):
     logger = log_function_start("load_data", 

@@ -6,12 +6,7 @@ from torchmetrics.regression import R2Score
 import lightning as L
 from omegaconf import DictConfig
 from pathlib import Path
-import sys
-script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
-repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
-scripts_path = repo_root / "scripts"
-sys.path.append(str(scripts_path))
-from logging_config import get_logger, setup_logging
+from scripts.logging_config import get_logger, setup_logging
 
 setup_logging(log_level="INFO", console_output=True, file_output=True)
 logger = get_logger("model_Ensemble")

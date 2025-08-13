@@ -10,15 +10,10 @@ import backtrader as bt
 import quantstats as qs
 
 
-from data_loader import load_data
-from feature_engineering import feature_engineering
-from model_Ensemble import EnsembleModule
-
-script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
-repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
-scripts_path = repo_root / "scripts"
-sys.path.append(str(scripts_path))
-from logging_config import get_logger, setup_logging
+from src.data_loader import load_data
+from src.feature_engineering import feature_engineering
+from src.model_Ensemble import EnsembleModule
+from scripts.logging_config import get_logger, setup_logging
 
 class DataProcessor:
     def __init__(self, cfg: DictConfig):

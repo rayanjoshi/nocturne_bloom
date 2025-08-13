@@ -1,8 +1,5 @@
 import pandas as pd
-from ta.momentum import RSIIndicator
-from ta.trend import MACD, ADXIndicator, MassIndex, AroonIndicator, CCIIndicator
-from ta.volatility import BollingerBands, AverageTrueRange, UlcerIndex
-from ta.volume import OnBalanceVolumeIndicator, ChaikinMoneyFlowIndicator, ForceIndexIndicator, NegativeVolumeIndexIndicator
+import pandas_ta as ta
 from pathlib import Path
 import hydra
 from omegaconf import DictConfig
@@ -13,7 +10,7 @@ script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
 repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
 scripts_path = repo_root / "scripts"
 sys.path.append(str(scripts_path))
-from logging_config import get_logger, setup_logging, log_function_start, log_function_end
+from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     logger = log_function_start("feature_engineering",dataFrame=dataFrame, save_data_path=save_data_path)
@@ -33,14 +30,13 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     logger.debug("Rows dropped after NaN removal: %d", dataFrame.shape[0])
     
     # -------- Momentum/ Trend Indicators -------- #
-    rsi = RSIIndicator(close=dataFrame['Close'], window=14)
-    dataFrame['RSI'] = rsi.rsi()
+    dataFrame['RSI'] = ta.rsi(dataFrame['Close'], length=14)
     logger.debug("Created 'RSI' with mean: %.2f, std: %.2f", dataFrame['RSI'].mean(), dataFrame['RSI'].std())
     dataFrame['rsi_momentum'] = dataFrame['RSI'].diff(5)
     
-    macd = MACD(close=dataFrame['Close'])
-    dataFrame['MACD'] = macd.macd()
-    dataFrame['MACDSignal'] = macd.macd_signal()
+    macd_data = ta.macd(dataFrame['Close'])
+    dataFrame['MACD'] = macd_data['MACD_12_26_9']
+    dataFrame['MACDSignal'] = macd_data['MACDs_12_26_9']
     logger.debug("Created MACD features: MACD range [%.2f, %.2f], MACDSignal range [%.2f, %.2f]",
                     dataFrame['MACD'].min(), dataFrame['MACD'].max(),
                     dataFrame['MACDSignal'].min(), dataFrame['MACDSignal'].max())
@@ -57,14 +53,11 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['rateOfChange'] = (dataFrame['Close'] - dataFrame['Close'].shift(12)) / dataFrame['Close'].shift(12) * 100
     dataFrame['momentum'] = dataFrame['Close'].diff(10)
     
-    adx = ADXIndicator(high=dataFrame['High'], low=dataFrame['Low'], close=dataFrame['Close'], window=14)
-    dataFrame['averageDirectionalIndex'] = adx.adx()
+    dataFrame['averageDirectionalIndex'] = ta.adx(dataFrame['High'], dataFrame['Low'], dataFrame['Close'], length=14)['ADX_14']
     
-    mi = MassIndex(high=dataFrame['High'], low=dataFrame['Low'], window_fast=9, window_slow=25)
-    dataFrame['massIndex'] = mi.mass_index()
+    dataFrame['massIndex'] = ta.massi(dataFrame['High'], dataFrame['Low'], fast=9, slow=25)
     
-    CCI = CCIIndicator(high=dataFrame['High'], low=dataFrame['Low'], close=dataFrame['Close'], window=20)
-    dataFrame['commodityChannelIndex'] = CCI.cci()
+    dataFrame['commodityChannelIndex'] = ta.cci(dataFrame['High'], dataFrame['Low'], dataFrame['Close'], length=20)
     
     dataFrame['price_acceleration'] = dataFrame['Close'].pct_change(5) - dataFrame['Close'].pct_change(10)
     
@@ -80,25 +73,23 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     )
     
     # --------- Volatility Indicators --------- #
-    bb = BollingerBands(close=dataFrame['Close'], window=20, window_dev=2)
-    dataFrame['BBHigh'] = bb.bollinger_hband()
-    dataFrame['BBLow'] = bb.bollinger_lband()
+    bb_data = ta.bbands(dataFrame['Close'], length=20, std=2)
+    dataFrame['BBHigh'] = bb_data['BBU_20_2.0']
+    dataFrame['BBLow'] = bb_data['BBL_20_2.0']
     logger.debug("Created Bollinger Bands: BBHigh mean %.2f, BBLow mean %.2f",
                     dataFrame['BBHigh'].mean(), dataFrame['BBLow'].mean())
     
     dataFrame['priceChange'] = dataFrame['Close'].diff()
     dataFrame['closeChangePercentage'] = dataFrame['Close'].pct_change()
     
-    atr = AverageTrueRange(high=dataFrame['High'], low=dataFrame['Low'], close=dataFrame['Close'], window=14)
-    dataFrame['averageTrueRange'] = atr.average_true_range()
+    dataFrame['averageTrueRange'] = ta.atr(dataFrame['High'], dataFrame['Low'], dataFrame['Close'], length=14)
     dataFrame['rollingStd'] = dataFrame['Close'].rolling(window=14).std()
     
-    aroon= AroonIndicator(high=dataFrame['High'], low=dataFrame['Low'], window=14)
-    dataFrame['aroonUp'] = aroon.aroon_up()
-    dataFrame['aroonDown'] = aroon.aroon_down()
+    aroon_data = ta.aroon(dataFrame['High'], dataFrame['Low'], length=14)
+    dataFrame['aroonUp'] = aroon_data['AROONU_14']
+    dataFrame['aroonDown'] = aroon_data['AROOND_14']
     
-    ui = UlcerIndex(close=dataFrame['Close'], window=14)
-    dataFrame['ulcerIndex'] = ui.ulcer_index()
+    dataFrame['ulcerIndex'] = ta.ui(dataFrame['Close'], length=14)
     
     dataFrame['vix_normalized'] = (dataFrame['VIX_Proxy'] - dataFrame['VIX_Proxy'].rolling(126).mean()) / dataFrame['VIX_Proxy'].rolling(126).std()  # Reduced from 252
     dataFrame['vix_regime'] = (dataFrame['VIX_Proxy'] > dataFrame['VIX_Proxy'].rolling(126).quantile(0.75)).astype(int)
@@ -108,23 +99,31 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['volumeChange'] = dataFrame['Volume'].diff()
     dataFrame['volumeRateOfChange'] = (dataFrame['Volume'] - dataFrame['Volume'].shift(12)) / dataFrame['Volume'].shift(12) * 100
     
-    obv = OnBalanceVolumeIndicator(close=dataFrame['Close'], volume=dataFrame['Volume'])
-    dataFrame['onBalanceVolume'] = obv.on_balance_volume()
+    dataFrame['onBalanceVolume'] = ta.obv(dataFrame['Close'], dataFrame['Volume'])
     logger.debug("Created 'onBalanceVolume' with mean: %.2f, std: %.2f",
                     dataFrame['onBalanceVolume'].mean(), dataFrame['onBalanceVolume'].std())
 
-    cmf = ChaikinMoneyFlowIndicator(high=dataFrame['High'], low=dataFrame['Low'], close=dataFrame['Close'], volume=dataFrame['Volume'], window=20)
-    dataFrame['chaikinMoneyFlow'] = cmf.chaikin_money_flow()
+    dataFrame['chaikinMoneyFlow'] = ta.cmf(dataFrame['High'], dataFrame['Low'], dataFrame['Close'], dataFrame['Volume'], length=20)
     logger.debug("Created 'chaikinMoneyFlow' with mean: %.2f, std: %.2f",
                     dataFrame['chaikinMoneyFlow'].mean(), dataFrame['chaikinMoneyFlow'].std())
 
-    fi = ForceIndexIndicator(close=dataFrame['Close'], volume=dataFrame['Volume'], window=20)
-    dataFrame['forceIndex'] = fi.force_index()
+    # Force Index - using custom calculation as pandas-ta might not have exact equivalent
+    dataFrame['forceIndex'] = (dataFrame['Close'] - dataFrame['Close'].shift(1)) * dataFrame['Volume']
+    dataFrame['forceIndex'] = dataFrame['forceIndex'].rolling(window=20).mean()
     logger.debug("Created 'forceIndex' with mean: %.2f, std: %.2f",
                     dataFrame['forceIndex'].mean(), dataFrame['forceIndex'].std())
 
-    nvi = NegativeVolumeIndexIndicator(close=dataFrame['Close'], volume=dataFrame['Volume'])
-    dataFrame['negativeVolumeIndex'] = nvi.negative_volume_index()
+    # Negative Volume Index - using custom calculation
+    nvi = []
+    nvi_value = 1000  # Starting value
+    for i in range(len(dataFrame)):
+        if i == 0:
+            nvi.append(nvi_value)
+        else:
+            if dataFrame['Volume'].iloc[i] < dataFrame['Volume'].iloc[i-1]:
+                nvi_value = nvi_value * (dataFrame['Close'].iloc[i] / dataFrame['Close'].iloc[i-1])
+            nvi.append(nvi_value)
+    dataFrame['negativeVolumeIndex'] = nvi
     logger.debug("Created 'negativeVolumeIndex' with mean: %.2f, std: %.2f",
                     dataFrame['negativeVolumeIndex'].mean(), dataFrame['negativeVolumeIndex'].std())
 

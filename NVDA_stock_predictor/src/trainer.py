@@ -8,14 +8,9 @@ from omegaconf import DictConfig, OmegaConf
 import sys
 from pathlib import Path
 
-from model_Ensemble import EnsembleModule
-from data_module import StockDataModule
-
-script_dir = Path(__file__).parent
-repo_root = script_dir.parent
-scripts_path = repo_root / "scripts"
-sys.path.append(str(scripts_path))
-from logging_config import get_logger, setup_logging
+from src.model_Ensemble import EnsembleModule
+from src.data_module import StockDataModule
+from scripts.logging_config import get_logger, setup_logging
 
 setup_logging(log_level="INFO", console_output=True, file_output=True)
 logger = get_logger("trainer")

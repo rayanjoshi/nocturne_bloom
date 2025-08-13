@@ -11,18 +11,13 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler, PopulationBasedTraining
 from ray.tune.search.optuna import OptunaSearch
-from ray.tune import CheckpointConfig, RunConfig
+from ray.air import CheckpointConfig, RunConfig, session
 from ray.air.integrations.wandb import WandbLoggerCallback
-import sys
 from pathlib import Path
 
-from model_Ensemble import EnsembleModule
-from data_module import StockDataModule
-script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
-repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
-scripts_path = repo_root / "scripts"
-sys.path.append(str(scripts_path))
-from logging_config import get_logger, setup_logging, log_function_start, log_function_end
+from src.model_Ensemble import EnsembleModule
+from src.data_module import StockDataModule
+from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def define_search_space_r2():
     """Define search space optimized for R2 score"""
@@ -166,7 +161,7 @@ def train_model(config, base_cfg, optimization_target="val_mae"):
             "epoch": trainer.current_epoch
         }
         
-        tune.report(metrics=metrics)
+    session.report(metrics)
     log_function_end("train_model", success=True)
 
 @hydra.main(version_base=None, config_path="../configs", config_name="trainer")
@@ -213,7 +208,7 @@ def main(cfg: DictConfig):
         metric_columns=["val_r2", "val_loss", "val_mae", "epoch"],
         max_report_frequency=30
     )
-    logger.debug("Reporter configured with columns: %s", reporter.metric_columns)
+    logger.debug("Reporter configured with columns: %s", reporter._metric_columns)
     
     # Configure run
     outputs_dir = os.path.abspath("../outputs/ray_results")
