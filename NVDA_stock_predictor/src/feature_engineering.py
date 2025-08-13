@@ -24,7 +24,13 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
             dataFrame[col] = pd.to_numeric(dataFrame[col], errors='coerce')
     
     # Ensure no NaN values before calculations
+    nan_count = dataFrame.isna().sum().sum()
+    total_values = dataFrame.size
+    if nan_count > 0:
+        nan_pct = (nan_count / total_values) * 100
+        logger.warning("Found %d NaN values in initial DataFrame (%.2f%% of all values)", nan_count, nan_pct)
     dataFrame.dropna(inplace=True)
+    logger.debug("Rows dropped after NaN removal: %d", dataFrame.shape[0])
     
     # -------- Momentum/ Trend Indicators -------- #
     rsi = RSIIndicator(close=dataFrame['Close'], window=14)
@@ -42,6 +48,9 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['SMA_20'] = dataFrame['Close'].rolling(window=20).mean()
     dataFrame['SMA_50'] = dataFrame['Close'].rolling(window=50).mean()
     dataFrame['SMA_200'] = dataFrame['Close'].rolling(window=200).mean()
+    if len(dataFrame) < 200:
+        logger.error("Insufficient data for SMA_200 calculation: %d rows available", len(dataFrame))
+        raise ValueError("Insufficient data for 200-day SMA")
     dataFrame['EMA_12'] = dataFrame['Close'].ewm(span=12, adjust=False).mean()
     dataFrame['EMA_26'] = dataFrame['Close'].ewm(span=26, adjust=False).mean()
     
@@ -232,7 +241,13 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     
     # Shift target column by -1 for next-day prediction BEFORE dropping NaN
     dataFrame['Target'] = dataFrame['Close'].shift(-1)
+    nan_count = dataFrame.isna().sum().sum()
+    total_values = dataFrame.size
+    if nan_count > 0:
+        nan_pct = (nan_count / total_values) * 100
+        logger.warning("Found %d NaN values in final DataFrame (%.2f%% of all values)", nan_count, nan_pct)
     dataFrame.dropna(inplace=True)  # Drop NaN values after shifting target
+    logger.debug("Rows dropped after NaN removal: %d", dataFrame.shape[0])
     
     # No scaling here - will be done in data_module.py after temporal split
     logger.info("Feature engineering complete - no scaling applied")
