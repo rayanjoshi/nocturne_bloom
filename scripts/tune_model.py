@@ -1,6 +1,5 @@
 import hydra
 import torch
-import os
 import tempfile
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
@@ -24,41 +23,41 @@ def define_search_space_r2():
     return {
         # CNN Architecture - More complex for R2 optimization
         "cnn.cnnChannels": tune.choice([
-            [16, 32, 16],
-            [32, 64, 32], 
-            [64, 128, 64],
-            [32, 64, 128],
-            [16, 64, 32]
+            (16, 32, 16),
+            (32, 64, 32), 
+            (64, 128, 64),
+            (32, 64, 128),
+            (16, 64, 32)
         ]),
         "cnn.kernelSize": tune.choice([
-            [3, 3, 2], 
-            [3, 3, 3],
-            [5, 3, 2],
-            [3, 5, 3],
-            [5, 5, 3]
+            (3, 3, 2), 
+            (3, 3, 3),
+            (5, 3, 2),
+            (3, 5, 3),
+            (5, 5, 3)
         ]),
         "cnn.dropout": tune.choice([
-            [0.2, 0.3],
-            [0.3, 0.4],
-            [0.3, 0.5],
-            [0.4, 0.5],
-            [0.5, 0.6]
+            (0.2, 0.3),
+            (0.3, 0.4),
+            (0.3, 0.5),
+            (0.4, 0.5),
+            (0.5, 0.6)
         ]),
         
         "cnn.poolSize": tune.choice([
-            [2, 2, 2],
-            [3, 3, 2],
-            [2, 3, 2],
-            [3, 2, 2],
-            [2, 2, 3]
+            (2, 2, 2),
+            (3, 3, 2),
+            (2, 3, 2),
+            (3, 2, 2),
+            (2, 2, 3)
         ]),
         
         "cnn.poolPadding": tune.choice([
-            [0, 0, 0],
-            [1, 1, 0],
-            [1, 0, 1],
-            [0, 1, 1],
-            [1, 1, 1]
+            (0, 0, 0),
+            (1, 1, 0),
+            (1, 0, 1),
+            (0, 1, 1),
+            (1, 1, 1)
         ]),
         
         # Model weights (balanced for R2)
@@ -178,7 +177,7 @@ def main(cfg: DictConfig):
     logger.info("Search space defined with %d parameters", len(search_space))
     metric = "val_mae"
     mode = "min"
-    num_samples = 100
+    num_samples = 1
     max_concurrent = 5
     logger.info("Optimizing for MAE")
     
@@ -211,8 +210,10 @@ def main(cfg: DictConfig):
     logger.debug("Reporter configured with columns: %s", reporter._metric_columns)
     
     # Configure run
-    outputs_dir = os.path.abspath("../outputs/ray_results")
-    os.makedirs(outputs_dir, exist_ok=True)
+    script_dir = Path(__file__).parent  # /path/to/repo/src
+    repo_root = script_dir.parent  # /path/to/repo/
+    outputs_dir = (repo_root / "outputs/ray_results").resolve()
+    outputs_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Output directory for results: %s", outputs_dir)
     
     run_config = RunConfig(
@@ -296,7 +297,7 @@ def main(cfg: DictConfig):
     best_cfg = OmegaConf.create(cfg_dict)
     
     # Save the configuration
-    os.makedirs("../outputs", exist_ok=True)
+    Path(best_config_path).parent.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(best_cfg, best_config_path)
     
     logger.info(f"\n💾 Best configuration saved to: {best_config_path}")
