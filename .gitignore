@@ -12,4 +12,5 @@ NVDA_stock_predictor/src/outputs/
 NVDA_stock_predictor/data/outputs/
 NVDA_stock_predictor/outputs/
 NVDA_stock_predictor/logs/*
+NVDA_stock_predictor/models/*
 outputs/
