@@ -4,13 +4,14 @@ data_module:
   x_save_path: data/processed/nvda_processed_x.pt
   y_save_path: data/processed/nvda_processed_y.pt
   y_scaled_save_path: models/target_scaler.pkl
+  x_scaled_save_path: models/feature_scaler.pkl
   batch_size: 64
   num_workers: 7
   train_val_split: 0.8
 
 data_processor:
-  x_load_path: ../data/processed/nvda_processed_data.npy
-  y_load_path: ../data/processed/nvda_processed_target.npy
-  x_save_path: ../data/processed/nvda_processed_x.pt
-  y_save_path: ../data/processed/nvda_processed_y.pt
+  x_load_path: data/processed/nvda_processed_data.npy
+  y_load_path: data/processed/nvda_processed_target.npy
+  x_save_path: data/processed/nvda_processed_x.pt
+  y_save_path: data/processed/nvda_processed_y.pt
   preprocessing_data_path: data/preprocessing/nvda_processed_data.csv

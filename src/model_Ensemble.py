@@ -408,10 +408,10 @@ class EnsembleModule(L.LightningModule):
     
     def save_components(self):
         logger.info("Saving CNN and Ridge model components to disk.")
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-        cnnPath = repo_root / self.cfg.model.cnnPath.lstrip('../')
-        ridgePath = repo_root / self.cfg.model.ridgePath.lstrip('../')
+        script_dir = Path(__file__).parent  # /path/to/repo/src
+        repo_root = script_dir.parent  # /path/to/repo/
+        cnnPath = Path(repo_root / self.cfg.model.cnnPath).resolve()
+        ridgePath = Path(repo_root / self.cfg.model.ridgePath).resolve()
         cnnPath.parent.mkdir(parents=True, exist_ok=True)
         ridgePath.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.cnn.state_dict(), cnnPath)

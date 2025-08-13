@@ -15,8 +15,7 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
     db = wrds.Connection(wrds_username=cfg.data_loader.WRDS_USERNAME)
     logger.info("Connected to WRDS successfully.")
     # print(db.list_libraries())  # prints accessible data sets
-    
-    sql_path = Path(__file__).parent / cfg.data_loader.sql_save_path.lstrip('../')
+    sql_path = Path(__file__).parent / cfg.data_loader.sql_save_path
     logger.info(f"Reading SQL query from {sql_path}.")
     with open(sql_path, 'r') as file:
         WRDS_query = file.read()
@@ -119,9 +118,9 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
     dataFrame = dataFrame.drop('QQQ_Return', axis=1)
     
     # Convert relative path to absolute path within the repository
-    script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-    repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-    output_path = repo_root / save_name.lstrip('../')  # Remove leading ../
+    script_dir = Path(__file__).parent  # /path/to/repo/src
+    repo_root = script_dir.parent  # /path/to/repo/
+    output_path = Path(repo_root / save_name.lstrip("./")).resolve()
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
     dataFrame.to_csv(output_path, index=True)

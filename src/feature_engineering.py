@@ -4,12 +4,6 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 import numpy as np
-import sys
-
-script_dir = Path(__file__).parent    # /path/to/repo/NVDA_stock_predictor/src
-repo_root = script_dir.parent         # /path/to/repo/NVDA_stock_predictor
-scripts_path = repo_root / "scripts"
-sys.path.append(str(scripts_path))
 from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
@@ -272,10 +266,10 @@ def main(cfg: DictConfig):
         setup_logging(log_level="INFO", console_output=True, file_output=True)
         logger = get_logger("main")
         # Convert relative path to absolute path within the repository
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-        raw_data_path = repo_root / cfg.data_loader.raw_data_path.lstrip('../')
-        save_data_path = repo_root / cfg.features.preprocessing_data_path.lstrip('../')
+        script_dir = Path(__file__).parent  # /path/to/repo/src
+        repo_root = script_dir.parent  # /path/to/repo/
+        raw_data_path = Path(repo_root / cfg.data_loader.raw_data_path).resolve()
+        save_data_path = Path(repo_root / cfg.features.preprocessing_data_path).resolve()
 
         logger.info(f"Reading raw data from: {raw_data_path.absolute()}")
         dataFrame = pd.read_csv(raw_data_path, header=0, index_col=0, parse_dates=True)

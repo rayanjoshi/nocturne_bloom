@@ -85,12 +85,12 @@ class StockDataset(Dataset):
         y_scaled = np.concatenate([y_train_scaled, y_val_scaled])
         
         # Save scalers
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-        
-        feature_scaler_path = repo_root / "models/feature_scaler.pkl"
-        target_scaler_path = repo_root / cfg.data_module.y_scaled_save_path.lstrip('../')
-        
+        script_dir = Path(__file__).parent  # /path/to/repo/src
+        repo_root = script_dir.parent  # /path/to/repo/
+
+        feature_scaler_path = Path(repo_root / cfg.data_module.x_scaled_save_path).resolve()
+        target_scaler_path = Path(repo_root / cfg.data_module.y_scaled_save_path).resolve()
+
         feature_scaler_path.parent.mkdir(parents=True, exist_ok=True)
         target_scaler_path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -102,8 +102,8 @@ class StockDataset(Dataset):
         logger.info(f"Scalers fitted on training data only: {len(y_train)} samples")
         
         # Save numpy arrays to sequence_processing directory 
-        x_save_path = repo_root / cfg.data_processor.x_load_path.lstrip('../')
-        y_save_path = repo_root / cfg.data_processor.y_load_path.lstrip('../')
+        x_save_path = repo_root / Path(cfg.data_processor.x_load_path).resolve()
+        y_save_path = repo_root / Path(cfg.data_processor.y_load_path).resolve()
         
         # Create directories if they don't exist
         x_save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,14 +129,14 @@ class StockDataset(Dataset):
     
     def save_tensors(self, cfg: DictConfig):
         """Save all tensors to files - call this once after creating the dataset"""
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
+        script_dir = Path(__file__).parent  # /path/to/repo/src
+        repo_root = script_dir.parent  # /path/to/repo/
         
         logger = get_logger("StockDataset.save_tensors")
-        
-        x_save_path = repo_root / cfg.data_processor.x_save_path.lstrip('../')
-        y_save_path = repo_root / cfg.data_processor.y_save_path.lstrip('../')
-        
+
+        x_save_path = Path(repo_root / cfg.data_processor.x_save_path).resolve()
+        y_save_path = Path(repo_root / cfg.data_processor.y_save_path).resolve()
+
         # Create directories if they don't exist
         x_save_path.parent.mkdir(parents=True, exist_ok=True)
         y_save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,11 +163,11 @@ class StockDataModule(L.LightningDataModule):
     def setup(self, stage=None):
         logger = get_logger("StockDataModule.setup")
         # Load the tensor files you just created
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
+        script_dir = Path(__file__).parent  # /path/to/repo/src
+        repo_root = script_dir.parent  # /path/to/repo/
         
-        x_path = repo_root / self.cfg.data_module.x_save_path.lstrip('../')
-        y_path = repo_root / self.cfg.data_module.y_save_path.lstrip('../')
+        x_path = Path(repo_root / self.cfg.data_module.x_save_path).resolve()
+        y_path = Path(repo_root / self.cfg.data_module.y_save_path).resolve()
         
         logger.info(f"Loading tensors from:")
         logger.info(f"  X: {x_path.absolute()}")
@@ -223,7 +223,7 @@ def main(cfg: DictConfig):
     dataset = StockDataset()
     
     # Read CSV and do feature engineering
-    preprocessing_data_path = repo_root / cfg.data_processor.preprocessing_data_path
+    preprocessing_data_path = Path(repo_root / cfg.data_processor.preprocessing_data_path).resolve()
     logger.info(f"Reading processed data from: {preprocessing_data_path.absolute()}")
     dataFrame = pd.read_csv(preprocessing_data_path, header=0, index_col=0, parse_dates=True)
     

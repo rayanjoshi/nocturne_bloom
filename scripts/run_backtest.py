@@ -35,10 +35,10 @@ class DataProcessor:
     
     def engineer_features(self):
         self.logger.info(f"Engineering features for {self.cfg.data_loader.TICKER}")
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-        raw_data_path = repo_root / self.cfg.data_loader.raw_data_path.lstrip('../')
-        save_data_path = repo_root / self.cfg.features.preprocessing_data_path.lstrip('../')
+        script_dir = Path(__file__).parent  # /path/to/repo/scripts
+        repo_root = script_dir.parent  # /path/to/repo/
+        raw_data_path = (repo_root / Path(self.cfg.data_loader.raw_data_path)).resolve()
+        save_data_path = (repo_root / Path(self.cfg.features.preprocessing_data_path)).resolve()
         dataFrame = pd.read_csv(
             raw_data_path, 
             header=0, 
@@ -51,15 +51,15 @@ class DataProcessor:
         self.logger.info(f"Converting features to tensors for {self.cfg.data_loader.TICKER}")
         window_size = self.cfg.data_module.window_size
         target_col = self.cfg.data_module.target_col
-        
+
         features = dataFrame.drop(columns=[target_col])
         target = dataFrame[target_col]
-        
+
         x, y = [], []
         for i in range(window_size, len(dataFrame)):
             x.append(features.iloc[i-window_size:i].values)  # past window_size days features
             y.append(target.iloc[i])                         # target is the value at day i
-        
+
         x = np.array(x)
         y = np.array(y)
 
@@ -67,13 +67,13 @@ class DataProcessor:
         self.logger.info(f"Target range before scaling: [{y.min():.6f}, {y.max():.6f}]")
 
         self.logger.info("Scaling features and targets...")
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predictor
-        getFeatureScaler = repo_root / self.cfg.data_module.feature_scaler_path.lstrip('../')
-        getTargetScaler = repo_root / self.cfg.data_module.target_scaler_path.lstrip('../')
+        script_dir = Path(__file__).parent  # /path/to/repo/scripts
+        repo_root = script_dir.parent  # /path/to/repo/
+        getFeatureScaler = (repo_root / Path(self.cfg.data_module.feature_scaler_path)).resolve()
+        getTargetScaler = (repo_root / Path(self.cfg.data_module.target_scaler_path)).resolve()
         feature_scaler = joblib.load(getFeatureScaler)
         target_scaler = joblib.load(getTargetScaler)
-        
+
         scaledX = feature_scaler.transform(x.reshape(-1, x.shape[-1])).reshape(x.shape)
         scaledY = target_scaler.transform(y.reshape(-1, 1)).flatten()
 
@@ -82,9 +82,9 @@ class DataProcessor:
 
         scaledX = torch.tensor(scaledX, dtype=torch.float32)
         scaledY = torch.tensor(scaledY, dtype=torch.float32)
-        
-        torch.save(scaledX, repo_root / self.cfg.data_module.x_scaled_save_path.lstrip('../'))
-        torch.save(scaledY, repo_root / self.cfg.data_module.y_scaled_save_path.lstrip('../'))
+
+        torch.save(scaledX, (repo_root / Path(self.cfg.data_module.x_scaled_save_path)).resolve())
+        torch.save(scaledY, (repo_root / Path(self.cfg.data_module.y_scaled_save_path)).resolve())
         return scaledX, scaledY
 
 
@@ -94,10 +94,10 @@ class MakePredictions:
         self.logger = get_logger("MakePredictions")
 
     def load_model(self):
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/src
-        repo_root = script_dir.parent  # /path/to/repo/NVDA_stock_predict
-        backtestX = repo_root / self.cfg.data_module.x_scaled_save_path.lstrip('../')
-        backtestY = repo_root / self.cfg.data_module.y_scaled_save_path.lstrip('../')
+        script_dir = Path(__file__).parent  # /path/to/repo/src
+        repo_root = script_dir.parent  # /path/to/repo/
+        backtestX = (repo_root / Path(self.cfg.data_module.x_scaled_save_path)).resolve()
+        backtestY = (repo_root / Path(self.cfg.data_module.y_scaled_save_path)).resolve()
         x = torch.load(backtestX)
         y = torch.load(backtestY)
         self.logger.info(f"Loaded {len(x)} samples with shape {x.shape} and target shape {y.shape}")
@@ -106,7 +106,7 @@ class MakePredictions:
         cnnPath = repo_root / self.cfg.model.cnnPath.lstrip('../')
         cnn_state_dict = torch.load(cnnPath)
         model.cnn.load_state_dict(cnn_state_dict)
-        
+
         ridgePath = repo_root / self.cfg.model.ridgePath.lstrip('../')
         ridge_state_dict = torch.load(ridgePath)
         weightShape = ridge_state_dict['weight'].shape
@@ -117,12 +117,12 @@ class MakePredictions:
         model.ridge.bias.data = torch.zeros(biasShape, dtype=torch.float32)
         model.ridge.load_state_dict(ridge_state_dict)
         model.ridge.is_fitted = True
-        
+
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model.to(device)
         model.eval()
         x = x.to(device)
-        
+
         predictions = []
         for i in range(len(x)):
             x_i = x[i].unsqueeze(0)  # add batch dim
@@ -140,13 +140,13 @@ class MakePredictions:
     def savePredictions(self, predictions):
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent
-        scalerPath = repo_root / self.cfg.data_module.target_scaler_path.lstrip('../')
+        scalerPath = (repo_root / Path(self.cfg.data_module.target_scaler_path)).resolve()
         target_scaler = joblib.load(scalerPath)
         predictions = np.array(predictions).reshape(-1, 1)
         predictions = target_scaler.inverse_transform(predictions).flatten()
         dataFramePredictions = pd.DataFrame(predictions, columns=['Predicted'])
-        
-        evaluate_data_path = repo_root / self.cfg.features.preprocessing_data_path.lstrip('../')
+
+        evaluate_data_path = (repo_root / Path(self.cfg.features.preprocessing_data_path)).resolve()
         # load preprocessed data and align to predictions
         df_eval = pd.read_csv(evaluate_data_path, header=0, index_col=0, parse_dates=True)
         dates = df_eval.index[self.cfg.data_module.window_size:]
@@ -174,7 +174,7 @@ class MakePredictions:
         dataFramePredictions.insert(4, 'Direction_Match', direction)
         self.logger.debug("Inserted Direction_Match column.")
 
-        save_path = repo_root / self.cfg.backtest.predictions_save_path.lstrip('../')
+        save_path = (repo_root / Path(self.cfg.backtest.predictions_save_path)).resolve()
         self.logger.debug(f"Predictions will be saved to {save_path}")
         save_path.parent.mkdir(parents=True, exist_ok=True)
         dataFramePredictions.to_csv(save_path, index=False)
@@ -188,7 +188,7 @@ class TradingSimulation:
         self.logger = get_logger("TradingSimulation")
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent
-        data_path = repo_root / self.cfg.backtest.predictions_save_path.lstrip('../')
+        data_path = (repo_root / Path(self.cfg.backtest.predictions_save_path)).resolve()
         df = pd.read_csv(data_path)
         self.predictions = df['Predicted'].values
         self.close_prices = df['Close'].values

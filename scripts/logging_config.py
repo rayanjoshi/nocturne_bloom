@@ -20,9 +20,9 @@ class ProjectLogger:
         if cls._base_config_set:
             return
         
-        script_dir = Path(__file__).parent  # /path/to/repo/NVDA_stock_predictor/scripts
-        project_root = script_dir.parent     # /path/to/repo/NVDA_stock_predictor
-        cls._log_dir = project_root / log_dir.lstrip("../")
+        script_dir = Path(__file__).parent  # /path/to/repo/scripts
+        project_root = script_dir.parent     # /path/to/repo/
+        cls._log_dir = Path(project_root / log_dir).resolve()
         cls._log_dir.mkdir(parents=True, exist_ok=True)
 
         root_logger = logging.getLogger()
