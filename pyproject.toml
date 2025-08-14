@@ -17,6 +17,8 @@ dependencies = [
     "scikit-learn",
     "pandas",
     "numpy<2",
+    "shap",
+    "captum",
 
     # -------- Data Handling & Visualization -------- #
     "matplotlib",
@@ -34,6 +36,7 @@ dependencies = [
     # -------- Backtesting & Technical Analysis -------- #
     "backtrader",
     "pandas-ta",                 # Modern replacement for ta
+    "quantstats",
 
     # -------- Dashboard -------- #
     "dash",
