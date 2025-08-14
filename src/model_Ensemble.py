@@ -56,23 +56,31 @@ class CNN(nn.Module):
             x = x.squeeze(-1)
         return x
 
-class RidgeRegressor(nn.Module):
+class ElasticNetRegressor(nn.Module):
     def __init__(self, cfg: DictConfig):
-        logger.info("Initializing RidgeRegressor with alpha=%.4f, fit_intercept=%s", cfg.Ridge.alpha, cfg.Ridge.get('fit_intercept', True))
+        logger.info("Initializing ElasticNetRegressor with alpha=%.4f, l1_ratio=%.4f, fit_intercept=%s",
+                    cfg.ElasticNet.alpha, cfg.ElasticNet.l1_ratio, cfg.ElasticNet.get('fit_intercept', True))
         super().__init__()
-        self.alpha = cfg.Ridge.alpha
-        self.fit_intercept = cfg.Ridge.get('fit_intercept', True)
+        self.alpha = cfg.ElasticNet.alpha
+        self.l1_ratio = cfg.ElasticNet.l1_ratio
+        self.tol = cfg.ElasticNet.get('tol', 1e-4)
+        self.max_iter = cfg.ElasticNet.get('max_iter', 1000)
+        self.fit_intercept = cfg.ElasticNet.get('fit_intercept', True)
+        self.eps = cfg.ElasticNet.get('eps', 1e-8)
 
-        # Ridge parameters (will be set during fit)
+        # ElasticNet parameters (will be set during fit)
         self.weight = nn.Parameter(torch.tensor([0,0]), requires_grad=False)
         self.bias = nn.Parameter(torch.tensor(0.0), requires_grad=False)
         self.is_fitted = False
         
-    def fit(self, X, y):
-        logger.info("Fitting RidgeRegressor on data: X shape %s, y shape %s", X.shape, y.shape)
-        """
-        Fit Ridge regression using pure PyTorch tensors
+    def soft_threshold(self, x, threshold):
+        return torch.sign(x) * torch.clamp(torch.abs(x) - threshold, min=0.0)
         
+    def fit(self, X, y):
+        logger.info("Fitting ElasticNetRegressor on data: X shape %s, y shape %s", X.shape, y.shape)
+        """
+        Fit ElasticNet regression using pure PyTorch tensors
+
         Args:
             X: Input features (torch.Tensor) shape (batch_size, seq_len, features) or (batch_size, features)
             y: Target values (torch.Tensor) shape (batch_size,)
@@ -85,53 +93,57 @@ class RidgeRegressor(nn.Module):
         if len(X.shape) == 3:
             X = X.view(X.shape[0], -1)
         
-        # Add intercept column if needed
+        numSamples, numFeatures = X.shape
+        
+        X_mean = X.mean(dim=0)
+        X_std = X.std(dim=0) + self.eps # add eps to prevent division by zero
+        X_standardised = (X - X_mean) / X_std
+        
         if self.fit_intercept:
-            ones = torch.ones(X.shape[0], 1, device=device)
-            XWithIntercept = torch.cat([X, ones], dim=1)
+            y_mean = y.mean()
+            y_centred = y - y_mean
         else:
-            XWithIntercept = X
-
-        # Ridge regression solution: (X^T X + α I)^(-1) X^T y
-        numFeatures = XWithIntercept.shape[1]
+            y_mean = 0.0
+            y_centred = y
         
-        # Create identity matrix for regularization
-        I = torch.eye(numFeatures, device=device)
+        beta = torch.zeros(numFeatures, device=device, dtype=X.dtype)
         
-        # Ridge regression closed form solution
-        XtX = torch.mm(XWithIntercept.t(), XWithIntercept)
-        XtX_reg = XtX + self.alpha * I
-        Xty = torch.mv(XWithIntercept.t(), y)
-
-        # Solve the system
-        try:
-            # Try Cholesky decomposition first (faster and more stable for positive definite matrices)
-            L = torch.linalg.cholesky(XtX_reg)
-            theta = torch.cholesky_solve(Xty.unsqueeze(1), L).squeeze(1)
-        except RuntimeError:
-            try:
-                # Fallback to standard solve
-                theta = torch.linalg.solve(XtX_reg, Xty)
-            except RuntimeError:
-                # Final fallback to SVD-based pseudo-inverse (most robust)
-                print("Warning: Using pseudo-inverse due to singular matrix")
-                theta = torch.linalg.pinv(XtX_reg) @ Xty
+        l1_regularisation = self.alpha * self.l1_ratio
+        l2_regularisation = self.alpha * (1 - self.l1_ratio)
         
-        # Split weight and bias
+        
+        for interation in range(self.max_iter):
+            beta_old = beta.clone()
+            
+            for j in range(numFeatures):
+                residual = y_centred - X_standardised @ beta + X_standardised[:, j] * beta[j]
+                rho_j = torch.dot(X_standardised[:, j], residual) / numSamples
+                
+                denominator = 1.0 + (l2_regularisation / numSamples)
+                beta[j] = self.soft_threshold(rho_j, l1_regularisation / numSamples) / denominator
+            
+            if torch.norm(beta - beta_old) < self.tol:
+                logger.info("Converged after %d iterations", interation + 1)
+                break
+        else:
+            logger.warning("Iteration %d: Coefficients not converged yet", interation + 1)
+        
+        self.weight.data = (beta / X_std).clone()  # Scale back to original feature space
+        
         if self.fit_intercept:
-            self.weight.data = theta[:-1].clone()
-            self.bias.data = theta[-1].clone()
+            intercept = y_mean - torch.dot(X_mean / X_std, beta)
+            self.bias.data = intercept.clone()
         else:
-            self.weight.data = theta.clone()
             self.bias.data = torch.tensor(0.0, device=device)
-        # Register as parameters (no gradient needed)
+        
         self.is_fitted = True
+        logger.info("ElasticNetRegressor fitted successfully with weight shape %s and bias %s", self.weight.shape, self.bias.shape)
         
     def forward(self, x):
-        logger.debug("RidgeRegressor forward pass with input shape: %s", x.shape)
+        logger.debug("ElasticNetRegressor forward pass with input shape: %s", x.shape)
         """
-        Forward pass for Ridge regression using pure tensors
-        
+        Forward pass for ElasticNet regression using pure tensors
+
         Args:
             x: Input tensor of shape (batch_size, seq_len, features) or (batch_size, features)
             
@@ -139,8 +151,8 @@ class RidgeRegressor(nn.Module):
             Predictions as torch.Tensor
         """
         if not self.is_fitted:
-            raise RuntimeError("Ridge model must be fitted before forward pass. Call .fit() first.")
-        
+            raise RuntimeError("ElasticNet model must be fitted before forward pass. Call .fit() first.")
+
         # Flatten to 2D if needed
         if len(x.shape) == 3:
             x = x.view(x.shape[0], -1)
@@ -157,9 +169,9 @@ class RidgeRegressor(nn.Module):
 
 class EnsembleModule(L.LightningModule):
     """
-    Champion CNN-Ridge Ensemble Lightning Module
-    
-    This combines CNN (10%) + Ridge (90%) in a proper Lightning module
+    CNN-ElasticNet Ensemble Lightning Module
+
+    This combines CNN + ElasticNet in a proper Lightning module
     """
     def __init__(self, cfg: DictConfig):
         logger.info("Initializing EnsembleModule with config: %s", cfg.model)
@@ -168,13 +180,13 @@ class EnsembleModule(L.LightningModule):
         
         # CNN component
         self.cnn = CNN(cfg)
-        
-        # Ridge component as nn.Module
-        self.ridge = RidgeRegressor(cfg)
-        
+
+        # ElasticNet component as nn.Module
+        self.elasticnet = ElasticNetRegressor(cfg)
+
         # Ensemble weights (optimized from your champion model)
         self.cnnWeight = cfg.model.cnnWeight
-        self.ridgeWeight = cfg.model.ridgeWeight
+        self.elasticNetWeight = cfg.model.elasticNetWeight
 
         # Loss function
         self.criterion = nn.HuberLoss(delta=cfg.model.get('huber_delta', 1.0))
@@ -190,14 +202,14 @@ class EnsembleModule(L.LightningModule):
 
         
         # Flags to track if models have been fitted
-        self.ridge_fitted = False
-    
+        self.elasticnet_fitted = False
+
     def on_train_start(self):
-        logger.info("on_train_start: Fitting Ridge regressor on all training data...")
-        """Fit Ridge regressor on all training data at the start of training"""
-        if not self.ridge_fitted:
-            print("Fitting Ridge regressor on all training data...")
-            
+        logger.info("on_train_start: Fitting ElasticNet regressor on all training data...")
+        """Fit ElasticNet regressor on all training data at the start of training"""
+        if not self.elasticnet_fitted:
+            print("Fitting ElasticNet regressor on all training data...")
+
             # Collect all training data
             allXValues = []
             allYValues = []
@@ -223,34 +235,33 @@ class EnsembleModule(L.LightningModule):
             XTrain = torch.cat(allXValues, dim=0)
             yTrain = torch.cat(allYValues, dim=0)
 
-            # Fit Ridge
-            if not self.ridge_fitted:
-                self.fit_ridge_on_batch(XTrain, yTrain)
-                print(f"Ridge regressor fitted on {len(yTrain)} samples!")
-            
-            
+            # Fit ElasticNet
+            if not self.elasticnet_fitted:
+                self.fit_elasticnet_on_batch(XTrain, yTrain)
+                print(f"ElasticNet regressor fitted on {len(yTrain)} samples!")
+
             # Clear memory
             del allXValues, allYValues, XTrain, yTrain
 
-    def fit_ridge_on_batch(self, X, y):
-        logger.info("Fitting Ridge on batch: X shape %s, y shape %s", X.shape, y.shape)
+    def fit_elasticnet_on_batch(self, X, y):
+        logger.info("Fitting ElasticNet on batch: X shape %s, y shape %s", X.shape, y.shape)
         """
-        Fit the Ridge component on a batch of training data
+        Fit the ElasticNet component on a batch of training data
         This can be called during training setup
         
         Args:
             X: Training features (torch.Tensor)
             y: Training targets (torch.Tensor)
         """
-        self.ridge.fit(X, y)
-        self.ridge_fitted = True
-    
-    
+        self.elasticnet.fit(X, y)
+        self.elasticnet_fitted = True
+
+
     def forward(self, x):
         logger.debug("Ensemble forward pass with input shape: %s", x.shape)
         """
-        Forward pass combining CNN and Ridge predictions
-        
+        Forward pass combining CNN and ElasticNet predictions
+
         Args:
             x: Input tensor of shape (batch_size, seq_len, features)
             
@@ -259,36 +270,36 @@ class EnsembleModule(L.LightningModule):
         """
         # CNN prediction
         cnnPrediction = self.cnn(x)
-        
-        # Ridge prediction (only if fitted)
-        if self.ridge_fitted and self.ridge.is_fitted:
+
+        # ElasticNet prediction (only if fitted)
+        if self.elasticnet_fitted and self.elasticnet.is_fitted:
             try:
-                ridgePrediction = self.ridge(x)
+                elasticnetPrediction = self.elasticnet(x)
 
                 # Ensure both predictions are on the same device and have same shape
-                if ridgePrediction.device != cnnPrediction.device:
-                    ridgePrediction = ridgePrediction.to(cnnPrediction.device)
+                if elasticnetPrediction.device != cnnPrediction.device:
+                    elasticnetPrediction = elasticnetPrediction.to(cnnPrediction.device)
 
-                if ridgePrediction.shape != cnnPrediction.shape:
-                    ridgePrediction = ridgePrediction.view_as(cnnPrediction)
+                if elasticnetPrediction.shape != cnnPrediction.shape:
+                    elasticnetPrediction = elasticnetPrediction.view_as(cnnPrediction)
 
                 # Validate predictions before combining
-                if torch.isnan(cnnPrediction).any() or torch.isnan(ridgePrediction).any():
+                if torch.isnan(cnnPrediction).any() or torch.isnan(elasticnetPrediction).any():
                     print("Warning: NaN detected in predictions, using CNN only")
                     return cnnPrediction
 
                 # Combine predictions with optimized weights
-                finalPrediction = self.cnnWeight * cnnPrediction + self.ridgeWeight * ridgePrediction
+                finalPrediction = self.cnnWeight * cnnPrediction + self.elasticNetWeight * elasticnetPrediction
 
                 # Clamp final predictions to prevent extreme values
                 finalPrediction = torch.clamp(finalPrediction, min=-1e6, max=1e6)
 
                 return finalPrediction
             except Exception as e:
-                print(f"Warning: Ridge prediction failed: {e}, using CNN only")
+                print(f"Warning: ElasticNet prediction failed: {e}, using CNN only")
                 return cnnPrediction
         else:
-            # If Ridge not fitted yet, return CNN prediction only
+            # If ElasticNet not fitted yet, return CNN prediction only
             return cnnPrediction
 
     def training_step(self, batch, batch_idx):
@@ -338,7 +349,7 @@ class EnsembleModule(L.LightningModule):
         print(f"MAE: {avg_mae:.4f}")
         print(f"RMSE: {avg_rmse:.4f}")
         print(f"R2: {avg_r2:.4f}")
-        print(f"Ridge Fitted: {self.ridge_fitted}")
+        print(f"ElasticNet Fitted: {self.elasticnet_fitted}")
         print(f"--------- Training Complete ---------\n")
         
         # Reset metrics for next epoch
@@ -407,16 +418,16 @@ class EnsembleModule(L.LightningModule):
         self.r2_val.reset()
     
     def save_components(self):
-        logger.info("Saving CNN and Ridge model components to disk.")
+        logger.info("Saving CNN and Elasticnet model components to disk.")
         script_dir = Path(__file__).parent  # /path/to/repo/src
         repo_root = script_dir.parent  # /path/to/repo/
         cnnPath = Path(repo_root / self.cfg.model.cnnPath).resolve()
-        ridgePath = Path(repo_root / self.cfg.model.ridgePath).resolve()
+        elasticNetPath = Path(repo_root / self.cfg.model.elasticNetPath).resolve()
         cnnPath.parent.mkdir(parents=True, exist_ok=True)
-        ridgePath.parent.mkdir(parents=True, exist_ok=True)
+        elasticNetPath.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.cnn.state_dict(), cnnPath)
-        torch.save(self.ridge.state_dict(), ridgePath)
-        print(f"CNN model saved to {cnnPath} and Ridge model saved to {ridgePath}.")
+        torch.save(self.elasticnet.state_dict(), elasticNetPath)
+        print(f"CNN model saved to {cnnPath} and ElasticNet model saved to {elasticNetPath}.")
 
     def configure_optimizers(self):
         logger.info("Configuring optimizers and learning rate scheduler.")

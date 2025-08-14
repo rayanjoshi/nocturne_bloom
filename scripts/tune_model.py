@@ -60,14 +60,17 @@ def define_search_space_r2():
             (1, 1, 1)
         ]),
         
-        # Model weights (balanced for R2)
-        "model.cnnWeight": tune.uniform(0.1, 0.5),
-        "model.ridgeWeight": tune.uniform(0.5, 0.9),
+        # Model weights
+        "model.cnnWeight": tune.uniform(0.05, 0.5),
+        "model.elasticNetWeight": tune.uniform(0.5, 0.95),
         "model.huber_delta": tune.uniform(0.1, 1.0),
         
-        # Ridge regularization
-        "Ridge.alpha": tune.loguniform(0.001, 100.0),
-        
+        # ElasticNet regularisation  
+        "ElasticNet.alpha": tune.loguniform(1e-5, 10.0),        # CRITICAL
+        "ElasticNet.l1_ratio": tune.uniform(0.01, 0.99),        # HIGH IMPACT  
+        "ElasticNet.tol": tune.loguniform(1e-6, 1e-2),          # FINE-TUNING
+        "ElasticNet.eps": tune.loguniform(1e-10, 1e-6),         # STABILITY
+
         # Optimizer settings
         "optimiser.name": tune.choice(["adam"]),
         "optimiser.lr": tune.loguniform(1e-6, 1e-2),
@@ -177,7 +180,7 @@ def main(cfg: DictConfig):
     logger.info("Search space defined with %d parameters", len(search_space))
     metric = "val_mae"
     mode = "min"
-    num_samples = 1
+    num_samples = 100
     max_concurrent = 5
     logger.info("Optimizing for MAE")
     
