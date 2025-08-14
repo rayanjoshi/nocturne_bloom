@@ -16,7 +16,7 @@ dependencies = [
     "torchmetrics",
     "scikit-learn",
     "pandas",
-    "numpy",
+    "numpy<2",
 
     # -------- Data Handling & Visualization -------- #
     "matplotlib",
