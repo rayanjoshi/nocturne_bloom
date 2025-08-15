@@ -107,16 +107,16 @@ class MakePredictions:
         cnn_state_dict = torch.load(cnnPath)
         model.cnn.load_state_dict(cnn_state_dict)
 
-        ridgePath = repo_root / self.cfg.model.ridgePath.lstrip('../')
-        ridge_state_dict = torch.load(ridgePath)
-        weightShape = ridge_state_dict['weight'].shape
-        self.logger.info(f"Ridge model weight shape: {weightShape}")
-        biasShape = ridge_state_dict['bias'].shape
-        self.logger.info(f"Ridge model bias shape: {biasShape}")
-        model.ridge.weight.data = torch.zeros(weightShape, dtype=torch.float32)
-        model.ridge.bias.data = torch.zeros(biasShape, dtype=torch.float32)
-        model.ridge.load_state_dict(ridge_state_dict)
-        model.ridge.is_fitted = True
+        ElasticNetPath = Path(repo_root / self.cfg.model.elasticNetPath).resolve()
+        ElasticNet_state_dict = torch.load(ElasticNetPath)
+        weightShape = ElasticNet_state_dict['weight'].shape
+        self.logger.info(f"ElasticNet model weight shape: {weightShape}")
+        biasShape = ElasticNet_state_dict['bias'].shape
+        self.logger.info(f"ElasticNet model bias shape: {biasShape}")
+        model.elasticnet.weight.data = torch.zeros(weightShape, dtype=torch.float32)
+        model.elasticnet.bias.data = torch.zeros(biasShape, dtype=torch.float32)
+        model.elasticnet.load_state_dict(ElasticNet_state_dict)
+        model.elasticnet.is_fitted = True
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model.to(device)
@@ -128,13 +128,13 @@ class MakePredictions:
             x_i = x[i].unsqueeze(0)  # add batch dim
             with torch.no_grad():
                 cnn_pred = model.cnn(x_i)
-                ridge_pred = model.ridge(x_i)
-                pred = model.cnnWeight * cnn_pred + model.ridgeWeight * ridge_pred
+                elasticnet_pred = model.elasticnet(x_i)
+                pred = model.cnnWeight * cnn_pred + model.elasticNetWeight * elasticnet_pred
                 if pred.dim() > 0:
                     pred = pred.squeeze(-1)
                 predictions.append(pred.item())
 
-        self.logger.info(f"Generated {len(predictions)} predictions using CNN+Ridge")
+        self.logger.info(f"Generated {len(predictions)} predictions using CNN+ElasticNet")
         return predictions
     
     def savePredictions(self, predictions):
@@ -195,7 +195,7 @@ class TradingSimulation:
         self.dates = df['Time'].values if 'Time' in df.columns else None
 
     def run(self):
-        cerebro = bt.Cerebro()
+        cerebro = bt.Cerebro(cheat_on_open=True)
         cerebro.addstrategy(StrategySimulation, predictions=self.predictions, close_prices=self.close_prices, dates=self.dates)
 
         # For Backtrader, create OHLCV DataFrame

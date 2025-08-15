@@ -5,12 +5,12 @@ defaults:
 
 trainer:
   project_name: "NVDA Stock Predictor - Optimized"
-  run_name: "CNN-Ridge Regression"
-  max_epochs: 70  # More epochs with early stopping
+  run_name: "CNN-ElasticNet Regression"
+  max_epochs: 50  # More epochs with early stopping
   accelerator: "auto"
   devices: 1
   log_every_n_steps: 10  # Optimized logging frequency
   seed: 42  # Optimized seed for reproducibility
-  gradient_clip_val: 0.6810662571808196  # Gradient clipping to prevent exploding gradients
-  early_stopping_patience: 10  # Stop if no improvement for 10 epochs
-  early_stopping_delta: 1.682093448232412e-06 # Optimized delta for early stopping
+  gradient_clip_val: 1.565586810233287  # Gradient clipping to prevent exploding gradients
+  early_stopping_patience: 20  # Stop if no improvement for 20 epochs
+  early_stopping_delta: 5.182188862061844e-05  # Optimized delta for early stopping
