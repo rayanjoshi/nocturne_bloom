@@ -37,6 +37,7 @@ dependencies = [
     "backtrader",
     "pandas-ta",                 # Modern replacement for ta
     "quantstats",
+    "IPython",
 
     # -------- Dashboard -------- #
     "dash",
