@@ -4,6 +4,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 import numpy as np
+from ray import logger
 from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
@@ -235,17 +236,20 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     # Shift target column by -1 for next-day prediction BEFORE dropping NaN
     dataFrame['Price_Target'] = dataFrame['Close'].shift(-1)
     logger.debug("Shifted 'Price_Target' column for next-day prediction")
-    dataFrame['Target_direction_pct'] = dataFrame['Price_Target'].pct_change(fill_method=None) * 100
-    logger.debug("Calculated 'Target_direction_pct' with mean: %.2f, std: %.2f",
-                    dataFrame['Target_direction_pct'].mean(),
-                    dataFrame['Target_direction_pct'].std()
+    dataFrame['direction_pct'] = ((dataFrame['Price_Target'] - dataFrame['Close']) / dataFrame['Close']) * 100
+    logger.debug("Calculated 'direction_pct' with mean: %.2f, std: %.2f",
+                    dataFrame['direction_pct'].mean(),
+                    dataFrame['direction_pct'].std()
                     )
 
     threshold = 0.5
-    dataFrame['Target_direction_3class'] = 1  # Default to sideways
-    dataFrame.loc[dataFrame['Target_direction_pct'] > threshold, 'Target_direction_3class'] = 2  # Strong up
-    dataFrame.loc[dataFrame['Target_direction_pct'] < -threshold, 'Target_direction_3class'] = 0  # Strong down
-    logger.debug("Created 'Target_direction_3class'")
+    dataFrame['Direction_Target'] = 1  # Default to sideways
+    dataFrame.loc[dataFrame['direction_pct'] > threshold, 'Direction_Target'] = 2  # Strong up
+    dataFrame.loc[(-threshold < dataFrame['direction_pct']) & (dataFrame['direction_pct'] < threshold), 'Direction_Target'] = 1  # Sideways
+    dataFrame.loc[dataFrame['direction_pct'] < -threshold, 'Direction_Target'] = 0  # Strong down
+    logger.debug("Created 'Direction_Target' before shifting")
+    dataFrame['Direction_Target'] = dataFrame['Direction_Target'].shift(-1)
+    logger.debug("Shifted 'Direction_Target' to align with current day's features")
 
     nan_count = dataFrame.isna().sum().sum()
     total_values = dataFrame.size
@@ -254,7 +258,9 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
         logger.warning("Found %d NaN values in final DataFrame (%.2f%% of all values)", nan_count, nan_pct)
     dataFrame.dropna(inplace=True)  # Drop NaN values after shifting target
     logger.debug("Rows dropped after NaN removal: %d", dataFrame.shape[0])
-    
+    dataFrame['Direction_Target'] = dataFrame['Direction_Target'].astype(int)
+    logger.info("Converted 'Direction_Target' to integer type")
+
     # No scaling here - will be done in data_module.py after temporal split
     logger.info("Feature engineering complete - no scaling applied")
     logger.info("Scaling will be performed in data_module.py after train/val split to avoid data leakage")
