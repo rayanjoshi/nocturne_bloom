@@ -2,12 +2,15 @@ model:
   target_sequence_length: 1  # Predicting the next closing price
   huber_delta: 0.579797487582631  # Delta for Huber loss, can be adjusted based on the dataset
   # non-normalized weighted averaging of CNN and ElasticNet regression outputs #
-  cnnWeight: 0.07969888681024252
-  elasticNetWeight: 0.9275966383353601
-  cnnPath: models/cnn_model.pth
+  price_cnn_weight: 0.07969888681024252
+  direction_cnn_weight: 0.07969888681024252
+  elasticNet_weight: 0.9275966383353601
+  ridge_weight: 0.9923011131897575
+  price_cnnPath: models/price_cnn_model.pth
+  direction_cnnPath: models/direction_cnn_model.pth
   elasticNetPath: models/elastic_net_model.pth
+  ridgePath: models/ridge_model.pth
 
-  
 cnn:
   inputChannels: 97  # Number of features (RSI, MACD, etc.)
   cnnChannels: [32, 64, 32]  # Reduced capacity to prevent overfitting
@@ -18,6 +21,9 @@ cnn:
   stride: 1
   dropout: [0.3, 0.5]
   outputSize: 1
+
+Ridge:
+  alpha: 0.1996926370318278  # Regularization strength for Ridge regression, can be adjusted based on the dataset
 
 ElasticNet:
   alpha: 4.107946250476794  # Regularization strength for ElasticNet, can be adjusted based on the dataset

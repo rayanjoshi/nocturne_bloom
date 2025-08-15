@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torchmetrics import MeanAbsoluteError, MeanSquaredError
+from torchmetrics import MeanAbsoluteError, MeanSquaredError, Accuracy, F1Score
 from torchmetrics.regression import R2Score
 import lightning as L
 from omegaconf import DictConfig
@@ -10,7 +10,7 @@ from scripts.logging_config import get_logger, setup_logging
 
 setup_logging(log_level="INFO", console_output=True, file_output=True)
 logger = get_logger("model_Ensemble")
-class CNN(nn.Module):
+class MultiHeadCNN(nn.Module):
     def __init__(self, cfg: DictConfig):
         logger.info("Initializing CNN model with config: %s", cfg.cnn)
         super().__init__()
@@ -36,25 +36,36 @@ class CNN(nn.Module):
             nn.Dropout(cfg.cnn.dropout[0])
         )
         
-        self.fc_layer = nn.Sequential(
+        self.sharedfeatures = nn.Sequential(
             nn.Linear(cnnChannels[2], cnnChannels[1]),
             nn.ReLU(),
             nn.Dropout(cfg.cnn.dropout[1]),
+            )
+        
+        self.pricehead = nn.Sequential(
             nn.Linear(cnnChannels[1], cnnChannels[2]),
             nn.ReLU(),
             nn.Dropout(cfg.cnn.dropout[0]),
-            nn.Linear(cnnChannels[2], cfg.cnn.outputSize)
+            nn.Linear(cnnChannels[2], 1)  # Output for price prediction
         )
         
+        num_classes = cfg.cnn.get('num_classes', 3)
+        self.directionhead = nn.Sequential(
+            nn.Linear(cnnChannels[1], cnnChannels[2]),
+            nn.ReLU(),
+            nn.Dropout(cfg.cnn.dropout[0]),
+            nn.Linear(cnnChannels[2], num_classes)  # Output for direction prediction
+        )
+
     def forward(self, x):
-        logger.debug("CNN forward pass with input shape: %s", x.shape)
+        logger.debug("MultiHeadCNN forward pass with input shape: %s", x.shape)
         x = x.transpose(1, 2)
         x = self.cnn(x)
         x = x.squeeze(-1)
-        x = self.fc_layer(x)
-        if x.dim() > 1 and x.size(-1) == 1:
-            x = x.squeeze(-1)
-        return x
+        x = self.sharedfeatures(x)
+        price_pred = self.pricehead(x).squeeze(-1)
+        direction_pred = self.directionhead(x)
+        return price_pred, direction_pred
 
 class RidgeRegressor(nn.Module):
     def __init__(self, cfg: DictConfig):
@@ -62,7 +73,8 @@ class RidgeRegressor(nn.Module):
         super().__init__()
         self.alpha = cfg.Ridge.alpha
         self.fit_intercept = cfg.Ridge.get('fit_intercept', True)
-
+        self.eps = cfg.Ridge.get('eps', 1e-8)  # Small value to prevent division by zero
+        
         # Ridge parameters (will be set during fit)
         self.weight = nn.Parameter(torch.tensor([0,0]), requires_grad=False)
         self.bias = nn.Parameter(torch.tensor(0.0), requires_grad=False)
@@ -91,7 +103,7 @@ class RidgeRegressor(nn.Module):
             XWithIntercept = torch.cat([X, ones], dim=1)
         else:
             XWithIntercept = X
-
+        
         # Ridge regression solution: (X^T X + α I)^(-1) X^T y
         numFeatures = XWithIntercept.shape[1]
         
@@ -100,9 +112,9 @@ class RidgeRegressor(nn.Module):
         
         # Ridge regression closed form solution
         XtX = torch.mm(XWithIntercept.t(), XWithIntercept)
-        XtX_reg = XtX + self.alpha * I
+        XtX_reg = XtX + self.alpha * I + (self.eps * torch.eye(numFeatures, device=device))
         Xty = torch.mv(XWithIntercept.t(), y)
-
+        
         # Solve the system
         try:
             # Try Cholesky decomposition first (faster and more stable for positive definite matrices)
@@ -155,9 +167,9 @@ class RidgeRegressor(nn.Module):
             
         return predictions
     
-class ElasticNetRegressor(nn.Module):
+class ElasticNetClassifier(nn.Module):
     def __init__(self, cfg: DictConfig):
-        logger.info("Initializing ElasticNetRegressor with alpha=%.4f, l1_ratio=%.4f, fit_intercept=%s",
+        logger.info("Initializing ElasticNetClassifier with alpha=%.4f, l1_ratio=%.4f, fit_intercept=%s",
                     cfg.ElasticNet.alpha, cfg.ElasticNet.l1_ratio, cfg.ElasticNet.get('fit_intercept', True))
         super().__init__()
         self.alpha = cfg.ElasticNet.alpha
@@ -166,7 +178,7 @@ class ElasticNetRegressor(nn.Module):
         self.max_iter = cfg.ElasticNet.get('max_iter', 1000)
         self.fit_intercept = cfg.ElasticNet.get('fit_intercept', True)
         self.eps = cfg.ElasticNet.get('eps', 1e-8)
-
+        
         # ElasticNet parameters (will be set during fit)
         self.weight = nn.Parameter(torch.tensor(0.0), requires_grad=False)
         self.bias = nn.Parameter(torch.tensor(0.0), requires_grad=False)
@@ -179,14 +191,63 @@ class ElasticNetRegressor(nn.Module):
     def soft_threshold(self, x, threshold):
         return torch.sign(x) * torch.clamp(torch.abs(x) - threshold, min=0.0)
         
+    def fit_single_class(self, X, y_binary, device):
+        numSamples, numFeatures = X.shape
+        
+        X_mean = X.mean(dim=0)
+        X_std = X.std(dim=0) + self.eps
+        X_standardised = (X - X_mean) / X_std
+        
+        if self.fit_intercept:
+            y_mean = y_binary.float().mean()
+            y_centred = y_binary.float() - y_mean
+        else:
+            self.y_mean = y_binary.float().mean()
+        
+        beta = torch.zeros(numFeatures, device=device, dtype=X.dtype)
+        l1_reg = self.alpha * self.l1_ratio
+        l2_reg = self.alpha * (1 - self.l1_ratio)
+        
+        # Create zero variance mask
+        zero_var_mask = X_std < self.eps
+        
+        # Replace zero variances with 1.0
+        X_std = torch.where(zero_var_mask, torch.tensor(1.0, device=device, dtype=X.dtype), X_std)
+        
+        # Coordinate descent
+        for iteration in range(self.max_iter):
+            beta_old = beta.clone()
+            
+            # Vectorized computation of residuals for all features
+            residuals = y_centred - X_standardised @ beta
+            
+            # Vectorized computation of rho_j for all features
+            rho = torch.matmul(X_standardised.t(), residuals) / numSamples
+            
+            # Apply zero variance mask
+            beta = torch.where(zero_var_mask, torch.tensor(0.0, device=device, dtype=X.dtype), beta)
+            
+            # Vectorized update of beta
+            denominator = 1.0 + (l2_reg / numSamples)
+            beta = torch.where(~zero_var_mask, 
+                            self.soft_threshold(rho, l1_reg / numSamples) / denominator,
+                            beta)
+            if torch.norm(beta - beta_old) < self.tol:
+                logger.info("Converged after %d iterations", iteration + 1)
+                break
+        weight = beta / X_std
+        if self.fit_intercept:
+            bias = y_mean - torch.dot(X_mean / X_std, beta)
+        else:
+            bias = torch.tensor(0.0, device=device)
+            
+        return weight, bias
+    
     def fit(self, X, y):
         """
-        Fit ElasticNet regression using pure PyTorch tensors
-
-        Args:
-            X: Input features (torch.Tensor) shape (batch_size, seq_len, features) or (batch_size, features)
-            y: Target values (torch.Tensor) shape (batch_size,)
+        Fit ElasticNet using one-vs-rest for multi-class classification
         """
+        logger.info("Fitting ElasticNetClassifier on data: X shape %s, y shape %s", X.shape, y.shape)
         # Ensure tensors are on same device
         device = X.device
         y = y.to(device)
@@ -196,99 +257,51 @@ class ElasticNetRegressor(nn.Module):
             X = X.view(X.shape[0], -1)
         
         numSamples, numFeatures = X.shape
-        self.weight = nn.Parameter(torch.tensor(numFeatures), requires_grad=False)
-        self.bias = nn.Parameter(torch.tensor(0.0), requires_grad=False)
+        self.weight = nn.ParameterList()
+        self.bias = nn.ParameterList()
         self.is_fitted = False
         
-        X_mean = X.mean(dim=0)
-        X_std = X.std(dim=0) + self.eps # add eps to prevent division by zero
-        X_standardised = (X - X_mean) / X_std
-        
-        if self.fit_intercept:
-            y_mean = y.mean()
-            y_centred = y - y_mean
-            self.y_mean = y_mean.clone()
-        else:
-            y_mean = 0.0
-            y_centred = y
-            self.y_mean = torch.tensor(0.0, device=device, dtype=X.dtype)
-        
-        self.X_mean = X_mean.clone()
-        self.X_std = X_std.clone()
-        beta = torch.zeros(numFeatures, device=device, dtype=X.dtype)
-        
-        l1_regularisation = self.alpha * self.l1_ratio
-        l2_regularisation = self.alpha * (1 - self.l1_ratio)
-        
-        zero_var_mask = X_std < self.eps
-        if zero_var_mask.any():
-            logger.warning(f"Found {zero_var_mask.sum().item()} features with zero variance. Setting std to 1.0.")
-            X_std = torch.where(zero_var_mask, torch.tensor(1.0, device=device, dtype=X.dtype), X_std)
-        
-        
-        for interation in range(self.max_iter):
-            beta_old = beta.clone()
-            
-            for j in range(numFeatures):
-                if zero_var_mask[j]:
-                    beta[j] = 0.0
-                    continue
-                residual = y_centred - X_standardised @ beta + X_standardised[:, j] * beta[j]
-                rho_j = torch.dot(X_standardised[:, j], residual) / numSamples
-                
-                denominator = 1.0 + (l2_regularisation / numSamples)
-                beta[j] = self.soft_threshold(rho_j, l1_regularisation / numSamples) / denominator
-            
-            if torch.norm(beta - beta_old) < self.tol:
-                logger.info("Converged after %d iterations", interation + 1)
-                break
-        else:
-            logger.warning("Iteration %d: Coefficients not converged yet", interation + 1)
-        
-        self.weight.data = (beta / X_std).clone()  # Scale back to original feature space
-        
-        if self.fit_intercept:
-            intercept = y_mean - torch.dot(X_mean / X_std, beta)
-            self.bias.data = intercept.clone()
-        else:
-            self.bias.data = torch.tensor(0.0, device=device)
+        for class_idx in range(self.num_classes):
+            y_binary = (y == class_idx).int()
+            weight, bias = self.fit_single_class(X, y_binary, device)
+            self.weights.append(nn.Parameter(weight.clone(), requires_grad=False))
+            self.biases.append(nn.Parameter(bias.clone(), requires_grad=False))
         
         self.is_fitted = True
         logger.info("ElasticNetRegressor fitted successfully with weight shape %s and bias %s", self.weight.shape, self.bias.shape)
         
     def forward(self, x):
-        logger.debug("ElasticNetRegressor forward pass with input shape: %s", x.shape)
-        """
-        Forward pass for ElasticNet regression using pure tensors
-
-        Args:
-            x: Input tensor of shape (batch_size, seq_len, features) or (batch_size, features)
-            
-        Returns:
-            Predictions as torch.Tensor
-        """
+        logger.debug("ElasticNetClassifier forward pass with input shape: %s", x.shape)
         if not self.is_fitted:
-            raise RuntimeError("ElasticNet model must be fitted before forward pass. Call .fit() first.")
-
+            raise RuntimeError("ElasticNet classifier must be fitted before forward pass. Call .fit() first.")
+        
         # Flatten to 2D if needed
         if len(x.shape) == 3:
             x = x.view(x.shape[0], -1)
         
         # Ensure tensors are on same device
-        x = x.to(self.weight.device)
+        device = self.weights[0].device
+        x = x.to(device)
         
-        # Linear prediction: y = X @ w + b
-        predictions = torch.mv(x, self.weight)
-        if self.fit_intercept:
-            predictions = predictions + self.bias
-            
-        return predictions
+        # Compute scores for all classes
+        scores = []
+        for class_idx in range(self.num_classes):
+            score = torch.mv(x, self.weights[class_idx])
+            if self.fit_intercept:
+                score = score + self.biases[class_idx]
+            scores.append(score.unsqueeze(1))
+        
+        # Stack scores and return logits
+        logits = torch.cat(scores, dim=1)
+        return logits
+    
 
 class EnsembleModule(L.LightningModule):
     """
-    CNN-ElasticNet Ensemble Lightning Module
-
-    This combines CNN + ElasticNet in a proper Lightning module
+    Multi-headed CNN-Ridge-ElasticNet Ensemble Lightning Module
+    - CNN provides both price and direction predictions
+    - Ridge complements price predictions
+    - ElasticNet complements direction predictions
     """
     def __init__(self, cfg: DictConfig):
         logger.info("Initializing EnsembleModule with config: %s", cfg.model)
@@ -296,19 +309,25 @@ class EnsembleModule(L.LightningModule):
         self.cfg = cfg
         
         # CNN component
-        self.cnn = CNN(cfg)
-
-        # ElasticNet component as nn.Module
-        self.elasticnet = ElasticNetRegressor(cfg)
-
-        # Ensemble weights (optimized from your champion model)
-        self.cnnWeight = cfg.model.cnnWeight
-        self.elasticNetWeight = cfg.model.elasticNetWeight
-
-        # Loss function
-        self.criterion = nn.HuberLoss(delta=cfg.model.get('huber_delta', 1.0))
+        self.cnn = MultiHeadCNN(cfg)
         
-        # Metrics
+        # Ridge component for price prediction
+        self.ridge = RidgeRegressor(cfg)
+        
+        # ElasticNet component as direction classification
+        self.elasticnet = ElasticNetClassifier(cfg)
+        
+        # Ensemble weights
+        self.price_cnn_weight = cfg.model.price_cnn_weight
+        self.price_ridge_weight = cfg.model.ridge_weight
+        self.direction_cnn_weight = cfg.model.direction_cnn_weight
+        self.direction_elasticnet_weight = cfg.model.elasticnet_weight
+        
+        # Loss function
+        self.price_criterion = nn.HuberLoss(delta=cfg.model.get('huber_delta', 1.0))
+        self.direction_criterion = nn.CrossEntropyLoss()
+        
+        # Price Metrics
         self.mae_train = MeanAbsoluteError()
         self.rmse_train = MeanSquaredError()
         self.r2_train = R2Score()
@@ -316,235 +335,345 @@ class EnsembleModule(L.LightningModule):
         self.rmse_val = MeanSquaredError()
         self.r2_val = R2Score()
         
-
+        # Direction Metrics
+        self.direction_acc_train = Accuracy(task="multiclass", num_classes=3)
+        self.direction_f1_train = F1Score(task="multiclass", num_classes=3, average='weighted')
+        self.direction_acc_val = Accuracy(task="multiclass", num_classes=3)
+        self.direction_f1_val = F1Score(task="multiclass", num_classes=3, average='weighted')
+        
         
         # Flags to track if models have been fitted
+        self.ridge_fitted = False
         self.elasticnet_fitted = False
-
+        
     def on_train_start(self):
-        logger.info("on_train_start: Fitting ElasticNet regressor on all training data...")
-        """Fit ElasticNet regressor on all training data at the start of training"""
-        if not self.elasticnet_fitted:
-            print("Fitting ElasticNet regressor on all training data...")
-
+        logger.info("on_train_start: Fitting Ridge and ElasticNet on all training data...")
+        """Fit Ridge and ElasticNet on all training data at the start of training"""
+        if not (self.ridge_fitted and self.elasticnet_fitted):
+            logger.info("Fitting Ridge and ElasticNet on all training data...")
+            
             # Collect all training data
-            allXValues = []
-            allYValues = []
+            all_X_Values = []
+            all_Price_Values = []
+            all_Direction_Values = []
             
-            # Get the dataloader
+            # Get the dataloader and move model to correct device
             train_dataloader = self.trainer.datamodule.train_dataloader()
-            
-            # Move model to correct device first
             device = next(self.parameters()).device
             
             with torch.no_grad():
-                for batch_idx, batch in enumerate(train_dataloader):
-                    x, y = batch
-                    x, y = x.to(device), y.to(device)
-                    allXValues.append(x)
-                    allYValues.append(y)
-
-                    # Optional: Limit to first N batches to save memory
-                    # if batch_idx >= 100:  # First 100 batches
-                    #     break
+            # Concatenate all batches from dataloader
+                x_all = []
+                price_y_all = []
+                for batch in train_dataloader:
+                    x, price_y = batch
+                    x_all.append(x)
+                    price_y_all.append(price_y)
+                
+                # Move concatenated tensors to device
+                x_all = torch.cat(x_all, dim=0).to(device)
+                price_y_all = torch.cat(price_y_all, dim=0).to(device)
+                
+                # Initialize output lists
+                all_X_Values = [x_all]
+                all_Price_Values = [price_y_all]
+                all_Direction_Values = []
+                
+                # Calculate price changes
+                price_changes = torch.zeros_like(price_y_all)
+                if len(all_Price_Values) > 1:
+                    prev_prices = all_Price_Values[-2][-price_y_all.shape[0]:]
+                    price_changes = ((price_y_all - prev_prices) / prev_prices) * 100
+                # For the first batch, price_changes remains zeros
+                
+                # Convert to direction classes
+                threshold = 0.5
+                direction_y = torch.ones_like(price_y_all, dtype=torch.long)  # Default: sideways
+                direction_y[price_changes > threshold] = 2  # Up
+                direction_y[price_changes < -threshold] = 0  # Down
+                
+                all_X_Values.append(x_all)
+                all_Price_Values.append(price_y_all)
+                all_Direction_Values.append(direction_y)
             
-            # Concatenate all batches
-            XTrain = torch.cat(allXValues, dim=0)
-            yTrain = torch.cat(allYValues, dim=0)
-
-            # Fit ElasticNet
+            # Ridge and ElasticNet fitting
+            if not self.ridge_fitted:
+                self.ridge.fit(x_all, price_y_all)
+                self.ridge_fitted = True
+                print(f"Ridge fitted on {len(price_y_all)} samples!")
+            
             if not self.elasticnet_fitted:
-                self.fit_elasticnet_on_batch(XTrain, yTrain)
-                print(f"ElasticNet regressor fitted on {len(yTrain)} samples!")
-
+                self.elasticnet.fit(x_all, direction_y)
+                self.elasticnet_fitted = True
+                print(f"ElasticNet fitted on {len(direction_y)} samples!")
             # Clear memory
-            del allXValues, allYValues, XTrain, yTrain
-
-    def fit_elasticnet_on_batch(self, X, y):
-        logger.info("Fitting ElasticNet on batch: X shape %s, y shape %s", X.shape, y.shape)
-        """
-        Fit the ElasticNet component on a batch of training data
-        This can be called during training setup
-        
-        Args:
-            X: Training features (torch.Tensor)
-            y: Training targets (torch.Tensor)
-        """
-        self.elasticnet.fit(X, y)
-        self.elasticnet_fitted = True
-
-
+            del all_X_Values, all_Price_Values, all_Direction_Values
+    
     def forward(self, x):
-        logger.debug("Ensemble forward pass with input shape: %s", x.shape)
-        """
-        Forward pass combining CNN and ElasticNet predictions
-
-        Args:
-            x: Input tensor of shape (batch_size, seq_len, features)
-            
-        Returns:
-            Combined predictions
-        """
-        # CNN prediction
-        cnnPrediction = self.cnn(x)
-
-        # ElasticNet prediction (only if fitted)
+        """Forward pass combining all model predictions"""
+        logger.debug("MultiHeadEnsemble forward pass with input shape: %s", x.shape)
+        
+        # CNN predictions (both heads)
+        cnn_price, cnn_direction_logits = self.cnn(x)
+        
+        # Ridge price prediction
+        ridge_price = None
+        if self.ridge_fitted and self.ridge.is_fitted:
+            try:
+                ridge_price = self.ridge(x)
+                if ridge_price.device != cnn_price.device:
+                    ridge_price = ridge_price.to(cnn_price.device)
+                if ridge_price.shape != cnn_price.shape:
+                    ridge_price = ridge_price.view_as(cnn_price)
+            except Exception as e:
+                logger.warning(f"Ridge prediction failed: {e}, using CNN only")
+                ridge_price = None
+        
+        # ElasticNet direction prediction
+        elasticnet_direction = None
         if self.elasticnet_fitted and self.elasticnet.is_fitted:
             try:
-                elasticnetPrediction = self.elasticnet(x)
-
-                # Ensure both predictions are on the same device and have same shape
-                if elasticnetPrediction.device != cnnPrediction.device:
-                    elasticnetPrediction = elasticnetPrediction.to(cnnPrediction.device)
-
-                if elasticnetPrediction.shape != cnnPrediction.shape:
-                    elasticnetPrediction = elasticnetPrediction.view_as(cnnPrediction)
-
-                # Validate predictions before combining
-                if torch.isnan(cnnPrediction).any() or torch.isnan(elasticnetPrediction).any():
-                    print("Warning: NaN detected in predictions, using CNN only")
-                    return cnnPrediction
-
-                # Combine predictions with optimized weights
-                finalPrediction = self.cnnWeight * cnnPrediction + self.elasticNetWeight * elasticnetPrediction
-
-                # Clamp final predictions to prevent extreme values
-                finalPrediction = torch.clamp(finalPrediction, min=-1e6, max=1e6)
-
-                return finalPrediction
+                elasticnet_direction = self.elasticnet(x)
+                if elasticnet_direction.device != cnn_direction_logits.device:
+                    elasticnet_direction = elasticnet_direction.to(cnn_direction_logits.device)
+                if elasticnet_direction.shape != cnn_direction_logits.shape:
+                    elasticnet_direction = elasticnet_direction.view_as(cnn_direction_logits)
             except Exception as e:
-                print(f"Warning: ElasticNet prediction failed: {e}, using CNN only")
-                return cnnPrediction
+                logger.warning(f"ElasticNet prediction failed: {e}, using CNN only")
+                elasticnet_direction = None
+        
+        # Combine predictions
+        if ridge_price is not None:
+            final_price = (self.price_cnn_weight * cnn_price + 
+                          self.price_ridge_weight * ridge_price)
         else:
-            # If ElasticNet not fitted yet, return CNN prediction only
-            return cnnPrediction
-
+            final_price = cnn_price
+        
+        if elasticnet_direction is not None:
+            final_direction = (self.direction_cnn_weight * cnn_direction_logits + 
+                              self.direction_elasticnet_weight * elasticnet_direction)
+        else:
+            final_direction = cnn_direction_logits
+        
+        # Clamp price predictions to prevent extreme values
+        final_price = torch.clamp(final_price, min=-1e6, max=1e6)
+        
+        return final_price, final_direction
+        
     def training_step(self, batch, batch_idx):
         logger.debug("Training step: batch_idx=%d", batch_idx)
-        x, y = batch
-        y_hat = self(x).squeeze(-1)
-        if y_hat.dim() != y.dim():
-            y_hat = y_hat.view_as(y)
         
-        loss = self.criterion(y_hat, y)
+        # Current batch structure: (x, price_target)
+        x, price_y = batch
         
-        # Update regression metrics
-        self.mae_train.update(y_hat, y)
-        self.rmse_train.update(y_hat, y)
-        self.r2_train.update(y_hat, y)
+        # Derive direction targets from price changes
+        # Since we don't have the actual previous prices, we'll use a proxy
+        # You may need to modify your data module to include direction targets
+        if batch_idx > 0 and hasattr(self, '_prev_price_batch'):
+            price_changes = ((price_y - self._prev_price_batch) / self._prev_price_batch) * 100
+        else:
+            # For first batch or when previous batch not available, use zeros
+            price_changes = torch.zeros_like(price_y)
         
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
-        return loss
+        threshold = 0.5
+        direction_y = torch.ones(price_y.shape[0], dtype=torch.long, device=self.device)
+        direction_y[price_changes > threshold] = 2  # Up
+        direction_y[price_changes < -threshold] = 0  # Down
+        
+        # Store current prices for next batch
+        self._prev_price_batch = price_y.detach()
+        
+        price_pred, direction_pred = self(x)
+        
+        # Ensure predictions match target dimensions
+        if price_pred.dim() != price_y.dim():
+            price_pred = price_pred.view_as(price_y)
+        
+        # Compute losses
+        price_loss = self.price_criterion(price_pred, price_y)
+        direction_loss = self.direction_criterion(direction_pred, direction_y)
+        
+        # Combined loss
+        total_loss = (self.price_loss_weight * price_loss + 
+                     self.direction_loss_weight * direction_loss)
+        
+        # Update metrics
+        self.price_mae_train.update(price_pred, price_y)
+        self.price_rmse_train.update(price_pred, price_y)
+        self.price_r2_train.update(price_pred, price_y)
+        
+        direction_preds_class = torch.argmax(direction_pred, dim=1)
+        self.direction_acc_train.update(direction_preds_class, direction_y)
+        self.direction_f1_train.update(direction_preds_class, direction_y)
+        
+        # Log losses
+        self.log('train_loss', total_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_price_loss', price_loss, on_step=True, on_epoch=True)
+        self.log('train_direction_loss', direction_loss, on_step=True, on_epoch=True)
+        
+        return total_loss
     
     def validation_step(self, batch, batch_idx):
         logger.debug("Validation step: batch_idx=%d", batch_idx)
-        x, y = batch
-        y_hat = self(x).squeeze(-1)
-        if y_hat.dim() != y.dim():
-            y_hat = y_hat.view_as(y)
-        loss = self.criterion(y_hat, y)
         
-        # Update regression metrics
-        self.mae_val.update(y_hat, y)
-        self.rmse_val.update(y_hat, y)
-        self.r2_val.update(y_hat, y)
+        # Current batch structure: (x, price_target)
+        x, price_y = batch
         
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
-        return loss
-    
+        # For validation, we'll use a simpler direction derivation
+        # You might want to include actual direction targets in your data
+        if batch_idx > 0 and hasattr(self, '_prev_val_price_batch'):
+            price_changes = ((price_y - self._prev_val_price_batch) / self._prev_val_price_batch) * 100
+        else:
+            price_changes = torch.zeros_like(price_y)
+            
+        threshold = 0.5
+        direction_y = torch.ones(price_y.shape[0], dtype=torch.long, device=self.device)
+        direction_y[price_changes > threshold] = 2  # Up
+        direction_y[price_changes < -threshold] = 0  # Down
+        
+        self._prev_val_price_batch = price_y.detach()
+        
+        price_pred, direction_pred = self(x)
+        
+        if price_pred.dim() != price_y.dim():
+            price_pred = price_pred.view_as(price_y)
+        
+        # Compute losses
+        price_loss = self.price_criterion(price_pred, price_y)
+        direction_loss = self.direction_criterion(direction_pred, direction_y)
+        total_loss = (self.price_loss_weight * price_loss + 
+                     self.direction_loss_weight * direction_loss)
+        
+        # Update metrics
+        self.price_mae_val.update(price_pred, price_y)
+        self.price_rmse_val.update(price_pred, price_y)
+        self.price_r2_val.update(price_pred, price_y)
+        
+        direction_preds_class = torch.argmax(direction_pred, dim=1)
+        self.direction_acc_val.update(direction_preds_class, direction_y)
+        self.direction_f1_val.update(direction_preds_class, direction_y)
+        
+        # Log losses
+        self.log('val_loss', total_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_price_loss', price_loss, on_step=False, on_epoch=True)
+        self.log('val_direction_loss', direction_loss, on_step=False, on_epoch=True)
+        
+        return total_loss
+        
     def on_train_epoch_end(self):
         logger.info("Training epoch ended. Computing training metrics.")
-        avg_mae = self.mae_train.compute()
-        avg_rmse = torch.sqrt(self.rmse_train.compute())
-        avg_r2 = self.r2_train.compute()
         
-        self.log('train_mae', avg_mae, prog_bar=True)
-        self.log('train_rmse', avg_rmse, prog_bar=True)
-        self.log('train_r2', avg_r2, prog_bar=True)
+        # Price metrics
+        price_mae = self.price_mae_train.compute()
+        price_rmse = torch.sqrt(self.price_rmse_train.compute())
+        price_r2 = self.price_r2_train.compute()
+        
+        # Direction metrics
+        direction_acc = self.direction_acc_train.compute()
+        direction_f1 = self.direction_f1_train.compute()
+        
+        # Log metrics
+        self.log('train_price_mae', price_mae, prog_bar=True)
+        self.log('train_price_rmse', price_rmse, prog_bar=True)
+        self.log('train_price_r2', price_r2, prog_bar=True)
+        self.log('train_direction_acc', direction_acc, prog_bar=True)
+        self.log('train_direction_f1', direction_f1, prog_bar=True)
         
         print(f"\n --------- Training Results ---------")
-        print(f"MAE: {avg_mae:.4f}")
-        print(f"RMSE: {avg_rmse:.4f}")
-        print(f"R2: {avg_r2:.4f}")
-        print(f"ElasticNet Fitted: {self.elasticnet_fitted}")
+        print(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
+        print(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
+        print(f"Models Fitted - Ridge: {self.ridge_fitted}, ElasticNet: {self.elasticnet_fitted}")
         print(f"--------- Training Complete ---------\n")
         
-        # Reset metrics for next epoch
-        self.mae_train.reset()
-        self.rmse_train.reset()
-        self.r2_train.reset()
-        
+        # Reset metrics
+        self.price_mae_train.reset()
+        self.price_rmse_train.reset()
+        self.price_r2_train.reset()
+        self.direction_acc_train.reset()
+        self.direction_f1_train.reset()
+    
     def on_validation_epoch_end(self):
         logger.info("Validation epoch ended. Computing validation metrics.")
-        avg_mae = self.mae_val.compute()
-        avg_rmse = torch.sqrt(self.rmse_val.compute())
-        avg_r2 = self.r2_val.compute()
         
-        self.log('val_mae', avg_mae, prog_bar=True)
-        self.log('val_rmse', avg_rmse, prog_bar=True)
-        self.log('val_r2', avg_r2, prog_bar=True)
+        # Price metrics
+        price_mae = self.price_mae_val.compute()
+        price_rmse = torch.sqrt(self.price_rmse_val.compute())
+        price_r2 = self.price_r2_val.compute()
+        
+        # Direction metrics
+        direction_acc = self.direction_acc_val.compute()
+        direction_f1 = self.direction_f1_val.compute()
+        
+        # Log metrics
+        self.log('val_price_mae', price_mae, prog_bar=True)
+        self.log('val_price_rmse', price_rmse, prog_bar=True)
+        self.log('val_price_r2', price_r2, prog_bar=True)
+        self.log('val_direction_acc', direction_acc, prog_bar=True)
+        self.log('val_direction_f1', direction_f1, prog_bar=True)
         
         print(f"\n --------- Validation Results ---------")
-        print(f"MAE: {avg_mae:.4f}")
-        print(f"RMSE: {avg_rmse:.4f}")
-        print(f"R2: {avg_r2:.4f}")
+        print(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
+        print(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
         print(f"--------- Validation Complete ---------\n")
         
-        # Reset metrics for next epoch
-        self.mae_val.reset()
-        self.rmse_val.reset()
-        self.r2_val.reset()
+        # Reset metrics
+        self.price_mae_val.reset()
+        self.price_rmse_val.reset()
+        self.price_r2_val.reset()
+        self.direction_acc_val.reset()
+        self.direction_f1_val.reset()
     
     def test_step(self, batch, batch_idx):
         logger.debug("Test step: batch_idx=%d", batch_idx)
-        """Test step for final evaluation"""
-        x, y = batch
-        y_hat = self(x).squeeze(-1)
-        if y_hat.dim() != y.dim():
-            y_hat = y_hat.view_as(y)
-        loss = self.criterion(y_hat, y)
-        
-        # Update test metrics (using validation metrics for simplicity)
-        self.mae_val.update(y_hat, y)
-        self.rmse_val.update(y_hat, y)
-        self.r2_val.update(y_hat, y)
-        
-        self.log('test_loss', loss, on_step=False, on_epoch=True)
-        return loss
+        return self.validation_step(batch, batch_idx)  # Reuse validation logic
     
     def on_test_epoch_end(self):
         logger.info("Test epoch ended. Computing test metrics.")
-        """Compute and log test metrics at the end of testing"""
-        avg_mae = self.mae_val.compute()
-        avg_rmse = torch.sqrt(self.rmse_val.compute())
-        avg_r2 = self.r2_val.compute()
+
+        # Price metrics
+        price_mae = self.price_mae_val.compute()
+        price_rmse = torch.sqrt(self.price_rmse_val.compute())
+        price_r2 = self.price_r2_val.compute()
         
-        self.log('test_mae', avg_mae)
-        self.log('test_rmse', avg_rmse)
-        self.log('test_r2', avg_r2)
+        # Direction metrics
+        direction_acc = self.direction_acc_val.compute()
+        direction_f1 = self.direction_f1_val.compute()
         
-        print(f"\n ============ TEST RESULTS ============")
-        print(f"Test MAE: {avg_mae:.6f}")
-        print(f"Test RMSE: {avg_rmse:.6f}")
-        print(f"Test R²: {avg_r2:.6f}")
-        print(f"=====================================\n")
+        # Log metrics
+        self.log('val_price_mae', price_mae, prog_bar=True)
+        self.log('val_price_rmse', price_rmse, prog_bar=True)
+        self.log('val_price_r2', price_r2, prog_bar=True)
+        self.log('val_direction_acc', direction_acc, prog_bar=True)
+        self.log('val_direction_f1', direction_f1, prog_bar=True)
         
+        print(f"\n --------- Test Results ---------")
+        print(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
+        print(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
+        print(f"--------- Test Complete ---------\n")
+
         # Reset metrics
-        self.mae_val.reset()
-        self.rmse_val.reset()
-        self.r2_val.reset()
+        self.price_mae_val.reset()
+        self.price_rmse_val.reset()
+        self.price_r2_val.reset()
+        self.direction_acc_val.reset()
+        self.direction_f1_val.reset()
     
     def save_components(self):
         logger.info("Saving CNN and Elasticnet model components to disk.")
         script_dir = Path(__file__).parent  # /path/to/repo/src
         repo_root = script_dir.parent  # /path/to/repo/
-        cnnPath = Path(repo_root / self.cfg.model.cnnPath).resolve()
+        direction_cnnPath = Path(repo_root / self.cfg.model.direction_cnnPath).resolve()
         elasticNetPath = Path(repo_root / self.cfg.model.elasticNetPath).resolve()
-        cnnPath.parent.mkdir(parents=True, exist_ok=True)
+        price_cnnPath = Path(repo_root / self.cfg.model.price_cnnPath).resolve()
+        ridgePath = Path(repo_root / self.cfg.model.ridgePath).resolve()
+        direction_cnnPath.parent.mkdir(parents=True, exist_ok=True)
         elasticNetPath.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self.cnn.state_dict(), cnnPath)
+        torch.save(self.cnn.state_dict(), direction_cnnPath)
         torch.save(self.elasticnet.state_dict(), elasticNetPath)
-        print(f"CNN model saved to {cnnPath} and ElasticNet model saved to {elasticNetPath}.")
+        torch.save(self.price_cnn.state_dict(), price_cnnPath)
+        torch.save(self.ridge.state_dict(), ridgePath)
+        print(f"DirectionCNN model saved to {direction_cnnPath}, ElasticNet model saved to {elasticNetPath}")
+        print(f"PriceCNN model saved to {price_cnnPath}, and Ridge model saved to {ridgePath}.")
 
     def configure_optimizers(self):
         logger.info("Configuring optimizers and learning rate scheduler.")
