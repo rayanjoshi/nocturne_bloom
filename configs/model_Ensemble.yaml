@@ -9,7 +9,7 @@ model:
 
   
 cnn:
-  inputChannels: 95  # Number of features (RSI, MACD, etc.)
+  inputChannels: 97  # Number of features (RSI, MACD, etc.)
   cnnChannels: [32, 64, 32]  # Reduced capacity to prevent overfitting
   kernelSize: [3, 3, 2]
   poolSize: [2, 2, 3]  # Pooling after each CNN layer

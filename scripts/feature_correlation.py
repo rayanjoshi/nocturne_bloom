@@ -28,7 +28,8 @@ plt.show()
 # Alternative: Show only the strongest correlations
 print("\n=== STRONGEST CORRELATIONS ===")
 # Get correlations with target variable (assuming 'close' or similar)
-target_cols = [col for col in corr.columns if 'close' in col.lower() or 'target' in col.lower()]
+target_cols = [col for col in corr.columns if 'close' in col.lower() or 'Price_Target' in col.lower()]
+
 if target_cols:
     target_col = target_cols[0]
     target_corr = corr[target_col].abs().sort_values(ascending=False)

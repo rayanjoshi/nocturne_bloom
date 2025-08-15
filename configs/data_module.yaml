@@ -1,9 +1,9 @@
 data_module:
   window_size: 10
-  target_col: Target
+  target_col: Price_Target
   x_save_path: data/processed/nvda_processed_x.pt
   y_save_path: data/processed/nvda_processed_y.pt
-  y_scaled_save_path: models/target_scaler.pkl
+  y_scaled_save_path: models/Price_Target_scaler.pkl
   x_scaled_save_path: models/feature_scaler.pkl
   batch_size: 64
   num_workers: 7
@@ -11,7 +11,7 @@ data_module:
 
 data_processor:
   x_load_path: data/processed/nvda_processed_data.npy
-  y_load_path: data/processed/nvda_processed_target.npy
+  y_load_path: data/processed/nvda_processed_Price_Target.npy
   x_save_path: data/processed/nvda_processed_x.pt
   y_save_path: data/processed/nvda_processed_y.pt
   preprocessing_data_path: data/preprocessing/nvda_processed_data.csv

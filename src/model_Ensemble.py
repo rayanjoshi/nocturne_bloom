@@ -56,6 +56,105 @@ class CNN(nn.Module):
             x = x.squeeze(-1)
         return x
 
+class RidgeRegressor(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        logger.info("Initializing RidgeRegressor with alpha=%.4f, fit_intercept=%s", cfg.Ridge.alpha, cfg.Ridge.get('fit_intercept', True))
+        super().__init__()
+        self.alpha = cfg.Ridge.alpha
+        self.fit_intercept = cfg.Ridge.get('fit_intercept', True)
+
+        # Ridge parameters (will be set during fit)
+        self.weight = nn.Parameter(torch.tensor([0,0]), requires_grad=False)
+        self.bias = nn.Parameter(torch.tensor(0.0), requires_grad=False)
+        self.is_fitted = False
+        
+    def fit(self, X, y):
+        logger.info("Fitting RidgeRegressor on data: X shape %s, y shape %s", X.shape, y.shape)
+        """
+        Fit Ridge regression using pure PyTorch tensors
+        
+        Args:
+            X: Input features (torch.Tensor) shape (batch_size, seq_len, features) or (batch_size, features)
+            y: Target values (torch.Tensor) shape (batch_size,)
+        """
+        # Ensure tensors are on same device
+        device = X.device
+        y = y.to(device)
+        
+        # Flatten X to 2D if it's 3D: (batch_size, seq_len, features) -> (batch_size, seq_len * features)
+        if len(X.shape) == 3:
+            X = X.view(X.shape[0], -1)
+        
+        # Add intercept column if needed
+        if self.fit_intercept:
+            ones = torch.ones(X.shape[0], 1, device=device)
+            XWithIntercept = torch.cat([X, ones], dim=1)
+        else:
+            XWithIntercept = X
+
+        # Ridge regression solution: (X^T X + α I)^(-1) X^T y
+        numFeatures = XWithIntercept.shape[1]
+        
+        # Create identity matrix for regularization
+        I = torch.eye(numFeatures, device=device)
+        
+        # Ridge regression closed form solution
+        XtX = torch.mm(XWithIntercept.t(), XWithIntercept)
+        XtX_reg = XtX + self.alpha * I
+        Xty = torch.mv(XWithIntercept.t(), y)
+
+        # Solve the system
+        try:
+            # Try Cholesky decomposition first (faster and more stable for positive definite matrices)
+            L = torch.linalg.cholesky(XtX_reg)
+            theta = torch.cholesky_solve(Xty.unsqueeze(1), L).squeeze(1)
+        except RuntimeError:
+            try:
+                # Fallback to standard solve
+                theta = torch.linalg.solve(XtX_reg, Xty)
+            except RuntimeError:
+                # Final fallback to SVD-based pseudo-inverse (most robust)
+                print("Warning: Using pseudo-inverse due to singular matrix")
+                theta = torch.linalg.pinv(XtX_reg) @ Xty
+        
+        # Split weight and bias
+        if self.fit_intercept:
+            self.weight.data = theta[:-1].clone()
+            self.bias.data = theta[-1].clone()
+        else:
+            self.weight.data = theta.clone()
+            self.bias.data = torch.tensor(0.0, device=device)
+        # Register as parameters (no gradient needed)
+        self.is_fitted = True
+        
+    def forward(self, x):
+        logger.debug("RidgeRegressor forward pass with input shape: %s", x.shape)
+        """
+        Forward pass for Ridge regression using pure tensors
+        
+        Args:
+            x: Input tensor of shape (batch_size, seq_len, features) or (batch_size, features)
+            
+        Returns:
+            Predictions as torch.Tensor
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Ridge model must be fitted before forward pass. Call .fit() first.")
+        
+        # Flatten to 2D if needed
+        if len(x.shape) == 3:
+            x = x.view(x.shape[0], -1)
+        
+        # Ensure tensors are on same device
+        x = x.to(self.weight.device)
+        
+        # Linear prediction: y = X @ w + b
+        predictions = torch.mv(x, self.weight)
+        if self.fit_intercept:
+            predictions = predictions + self.bias
+            
+        return predictions
+    
 class ElasticNetRegressor(nn.Module):
     def __init__(self, cfg: DictConfig):
         logger.info("Initializing ElasticNetRegressor with alpha=%.4f, l1_ratio=%.4f, fit_intercept=%s",

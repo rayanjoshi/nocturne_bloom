@@ -233,7 +233,20 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     )
     
     # Shift target column by -1 for next-day prediction BEFORE dropping NaN
-    dataFrame['Target'] = dataFrame['Close'].shift(-1)
+    dataFrame['Price_Target'] = dataFrame['Close'].shift(-1)
+    logger.debug("Shifted 'Price_Target' column for next-day prediction")
+    dataFrame['Target_direction_pct'] = dataFrame['Price_Target'].pct_change(fill_method=None) * 100
+    logger.debug("Calculated 'Target_direction_pct' with mean: %.2f, std: %.2f",
+                    dataFrame['Target_direction_pct'].mean(),
+                    dataFrame['Target_direction_pct'].std()
+                    )
+
+    threshold = 0.5
+    dataFrame['Target_direction_3class'] = 1  # Default to sideways
+    dataFrame.loc[dataFrame['Target_direction_pct'] > threshold, 'Target_direction_3class'] = 2  # Strong up
+    dataFrame.loc[dataFrame['Target_direction_pct'] < -threshold, 'Target_direction_3class'] = 0  # Strong down
+    logger.debug("Created 'Target_direction_3class'")
+
     nan_count = dataFrame.isna().sum().sum()
     total_values = dataFrame.size
     if nan_count > 0:

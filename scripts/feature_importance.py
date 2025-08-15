@@ -17,8 +17,8 @@ preprocessed_path = repo_root / 'data/preprocessing/nvda_processed_data.csv'
 df = pd.read_csv(preprocessed_path, header=0, index_col=0, parse_dates=True)
 
 # Drop target column and any non-feature columns
-X = df.drop(columns=['Target'])
-y = df['Target']
+X = df.drop(columns=['Price_Target'])
+y = df['Price_Target']
 
 
 # Use features as-is for next-day prediction
