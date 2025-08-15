@@ -113,10 +113,10 @@ class MakePredictions:
         self.logger.info(f"ElasticNet model weight shape: {weightShape}")
         biasShape = ElasticNet_state_dict['bias'].shape
         self.logger.info(f"ElasticNet model bias shape: {biasShape}")
-        model.elasticnet.weight.data = torch.zeros(weightShape, dtype=torch.float32)
-        model.elasticnet.bias.data = torch.zeros(biasShape, dtype=torch.float32)
-        model.elasticnet.load_state_dict(ElasticNet_state_dict)
-        model.elasticnet.is_fitted = True
+        model.elasticNet.weight.data = torch.zeros(weightShape, dtype=torch.float32)
+        model.elasticNet.bias.data = torch.zeros(biasShape, dtype=torch.float32)
+        model.elasticNet.load_state_dict(ElasticNet_state_dict)
+        model.elasticNet.is_fitted = True
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model.to(device)
@@ -128,8 +128,8 @@ class MakePredictions:
             x_i = x[i].unsqueeze(0)  # add batch dim
             with torch.no_grad():
                 cnn_pred = model.cnn(x_i)
-                elasticnet_pred = model.elasticnet(x_i)
-                pred = model.cnnWeight * cnn_pred + model.elasticNetWeight * elasticnet_pred
+                elasticNet_pred = model.elasticNet(x_i)
+                pred = model.cnnWeight * cnn_pred + model.elasticNetWeight * elasticNet_pred
                 if pred.dim() > 0:
                     pred = pred.squeeze(-1)
                 predictions.append(pred.item())
