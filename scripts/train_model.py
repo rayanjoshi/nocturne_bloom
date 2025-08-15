@@ -1,4 +1,3 @@
-
 import hydra
 import torch
 from lightning.pytorch import Trainer
@@ -17,9 +16,9 @@ logger = get_logger("trainer")
 
 
 checkpoint_callback = ModelCheckpoint(
-    monitor="val_mae",
+    monitor="val_price_mae",
     dirpath="../models",
-    filename="model-{epoch:02d}-{val_mae:.2f}",
+    filename="model-{epoch:02d}-{val_price_mae:.2f}",
     save_top_k=1,
     mode="min",
 )
