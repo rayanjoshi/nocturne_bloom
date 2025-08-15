@@ -69,15 +69,18 @@ class ElasticNetRegressor(nn.Module):
         self.eps = cfg.ElasticNet.get('eps', 1e-8)
 
         # ElasticNet parameters (will be set during fit)
-        self.weight = nn.Parameter(torch.tensor([0,0]), requires_grad=False)
+        self.weight = nn.Parameter(torch.tensor(0.0), requires_grad=False)
         self.bias = nn.Parameter(torch.tensor(0.0), requires_grad=False)
         self.is_fitted = False
+        
+        self.X_mean = None
+        self.X_std = None
+        self.y_mean = None
         
     def soft_threshold(self, x, threshold):
         return torch.sign(x) * torch.clamp(torch.abs(x) - threshold, min=0.0)
         
     def fit(self, X, y):
-        logger.info("Fitting ElasticNetRegressor on data: X shape %s, y shape %s", X.shape, y.shape)
         """
         Fit ElasticNet regression using pure PyTorch tensors
 
@@ -94,6 +97,9 @@ class ElasticNetRegressor(nn.Module):
             X = X.view(X.shape[0], -1)
         
         numSamples, numFeatures = X.shape
+        self.weight = nn.Parameter(torch.tensor(numFeatures), requires_grad=False)
+        self.bias = nn.Parameter(torch.tensor(0.0), requires_grad=False)
+        self.is_fitted = False
         
         X_mean = X.mean(dim=0)
         X_std = X.std(dim=0) + self.eps # add eps to prevent division by zero
@@ -102,20 +108,32 @@ class ElasticNetRegressor(nn.Module):
         if self.fit_intercept:
             y_mean = y.mean()
             y_centred = y - y_mean
+            self.y_mean = y_mean.clone()
         else:
             y_mean = 0.0
             y_centred = y
+            self.y_mean = torch.tensor(0.0, device=device, dtype=X.dtype)
         
+        self.X_mean = X_mean.clone()
+        self.X_std = X_std.clone()
         beta = torch.zeros(numFeatures, device=device, dtype=X.dtype)
         
         l1_regularisation = self.alpha * self.l1_ratio
         l2_regularisation = self.alpha * (1 - self.l1_ratio)
+        
+        zero_var_mask = X_std < self.eps
+        if zero_var_mask.any():
+            logger.warning(f"Found {zero_var_mask.sum().item()} features with zero variance. Setting std to 1.0.")
+            X_std = torch.where(zero_var_mask, torch.tensor(1.0, device=device, dtype=X.dtype), X_std)
         
         
         for interation in range(self.max_iter):
             beta_old = beta.clone()
             
             for j in range(numFeatures):
+                if zero_var_mask[j]:
+                    beta[j] = 0.0
+                    continue
                 residual = y_centred - X_standardised @ beta + X_standardised[:, j] * beta[j]
                 rho_j = torch.dot(X_standardised[:, j], residual) / numSamples
                 
