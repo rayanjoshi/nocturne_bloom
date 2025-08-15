@@ -4,8 +4,8 @@ defaults:
   - data_module
 
 trainer:
-  project_name: "NVDA Stock Predictor - Optimized"
-  run_name: "CNN-ElasticNet Regression"
+  project_name: "NVDA Stock Predictor - Experimental"
+  run_name: "Ensemble Model"
   max_epochs: 50  # More epochs with early stopping
   accelerator: "auto"
   devices: 1
