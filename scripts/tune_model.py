@@ -47,163 +47,189 @@ class MultiObjectiveMetric:
 
 def optuna_search_space(trial):
     """
-    Define-by-run function for Optuna that returns hyperparameters.
-    This is the correct way to define search spaces for OptunaSearch.
+    Exhaustive define-by-run function for Optuna that returns hyperparameters.
+    Optimized to find harmony between low MAE and high directional accuracy.
     """
     if not OPTUNA_AVAILABLE:
         return {}
     
     return {
-        # CNN Architecture parameters
-        "cnn_ch1": trial.suggest_categorical("cnn_ch1", [16, 32, 64, 128]),
-        "cnn_ch2": trial.suggest_categorical("cnn_ch2", [32, 64, 128, 256]),
-        "cnn_ch3": trial.suggest_categorical("cnn_ch3", [16, 32, 64, 128]),
+        # CNN Architecture parameters - comprehensive ranges
+        "cnn_ch1": trial.suggest_categorical("cnn_ch1", [8, 16, 24, 32, 48, 64, 96, 128]),
+        "cnn_ch2": trial.suggest_categorical("cnn_ch2", [16, 32, 48, 64, 96, 128, 192, 256]),
+        "cnn_ch3": trial.suggest_categorical("cnn_ch3", [8, 16, 24, 32, 48, 64, 96, 128]),
         
-        # Kernel sizes
-        "kernel1": trial.suggest_categorical("kernel1", [2, 3, 5]),
-        "kernel2": trial.suggest_categorical("kernel2", [2, 3, 5]),
-        "kernel3": trial.suggest_categorical("kernel3", [2, 3, 4]),
+        # Kernel sizes - expanded range
+        "kernel1": trial.suggest_categorical("kernel1", [1, 2, 3, 4, 5, 7]),
+        "kernel2": trial.suggest_categorical("kernel2", [1, 2, 3, 4, 5, 7]),
+        "kernel3": trial.suggest_categorical("kernel3", [1, 2, 3, 4, 5]),
         
-        # Pooling
-        "pool1": trial.suggest_categorical("pool1", [2, 3, 4]),
-        "pool2": trial.suggest_categorical("pool2", [2, 3, 4]),
-        "pool3": trial.suggest_categorical("pool3", [2, 3, 4]),
+        # Padding configurations
+        "padding1": trial.suggest_categorical("padding1", [0, 1, 2, 3]),
+        "padding2": trial.suggest_categorical("padding2", [0, 1, 2, 3]),
+        "padding3": trial.suggest_categorical("padding3", [0, 1, 2, 3]),
         
-        # Pool padding
-        "pool_pad1": trial.suggest_categorical("pool_pad1", [0, 1]),
-        "pool_pad2": trial.suggest_categorical("pool_pad2", [0, 1]),
-        "pool_pad3": trial.suggest_categorical("pool_pad3", [0, 1]),
+        # Pooling configurations
+        "pool1": trial.suggest_categorical("pool1", [1, 2, 3, 4, 5]),
+        "pool2": trial.suggest_categorical("pool2", [1, 2, 3, 4, 5]),
+        "pool3": trial.suggest_categorical("pool3", [1, 2, 3, 4, 5]),
         
-        # Dropout rates
-        "dropout1": trial.suggest_float("dropout1", 0.1, 0.6),
-        "dropout2": trial.suggest_float("dropout2", 0.2, 0.7),
+        # CNN stride
+        "cnn_stride": trial.suggest_categorical("cnn_stride", [1, 2]),
         
-        # Ridge parameters
-        "ridge_alpha": trial.suggest_float("ridge_alpha", 1e-3, 1e1, log=True),
-        "ridge_fit_intercept": trial.suggest_categorical("ridge_fit_intercept", [True, False]),
+        # Dropout rates - fine-grained control
+        "dropout1": trial.suggest_float("dropout1", 0.05, 0.7, step=0.05),
+        "dropout2": trial.suggest_float("dropout2", 0.1, 0.8, step=0.05),
         
-        # ElasticNet parameters
-        "elastic_alpha": trial.suggest_float("elastic_alpha", 1e-5, 1e2, log=True),
-        "elastic_l1_ratio": trial.suggest_float("elastic_l1_ratio", 0.01, 0.99),
-        "elastic_max_iter": trial.suggest_categorical("elastic_max_iter", [500, 1000, 2000]),
-        "elastic_tol": trial.suggest_float("elastic_tol", 1e-6, 1e-2, log=True),
-        "elastic_eps": trial.suggest_float("elastic_eps", 1e-10, 1e-6, log=True),
+        # Ridge parameters - expanded range
+        "ridge_alpha": trial.suggest_float("ridge_alpha", 1e-4, 1e2, log=True),
+        "ridge_eps": trial.suggest_float("ridge_eps", 1e-10, 1e-6, log=True),
         
-        # Ensemble weights (raw values, will be normalized)
-        "price_cnn_weight_raw": trial.suggest_float("price_cnn_weight_raw", 0.05, 0.5),
-        "ridge_weight_raw": trial.suggest_float("ridge_weight_raw", 0.5, 1.5),
-        "direction_cnn_weight_raw": trial.suggest_float("direction_cnn_weight_raw", 0.3, 0.8),
-        "elastic_weight_raw": trial.suggest_float("elastic_weight_raw", 0.5, 1.2),
+        # ElasticNet parameters - comprehensive tuning
+        "elastic_alpha": trial.suggest_float("elastic_alpha", 1e-6, 1e3, log=True),
+        "elastic_l1_ratio": trial.suggest_float("elastic_l1_ratio", 0.001, 0.999, step=0.001),
+        "elastic_max_iter": trial.suggest_categorical("elastic_max_iter", [200, 500, 1000, 1500, 2000, 3000]),
+        "elastic_tol": trial.suggest_float("elastic_tol", 1e-8, 1e-2, log=True),
+        "elastic_eps": trial.suggest_float("elastic_eps", 1e-12, 1e-5, log=True),
         
-        # Loss weights (raw values, will be normalized)
-        "price_loss_weight_raw": trial.suggest_float("price_loss_weight_raw", 0.2, 0.8),
-        "direction_loss_weight_raw": trial.suggest_float("direction_loss_weight_raw", 0.2, 0.8),
+        # Ensemble weights - fine-grained control for balance
+        "price_cnn_weight_raw": trial.suggest_float("price_cnn_weight_raw", 0.01, 2.0, step=0.01),
+        "ridge_weight_raw": trial.suggest_float("ridge_weight_raw", 0.01, 2.0, step=0.01),
+        "direction_cnn_weight_raw": trial.suggest_float("direction_cnn_weight_raw", 0.01, 2.0, step=0.01),
+        "elastic_weight_raw": trial.suggest_float("elastic_weight_raw", 0.01, 2.0, step=0.01),
         
-        # Huber loss parameter
-        "huber_delta": trial.suggest_float("huber_delta", 0.1, 2.0),
+        # Loss weights - critical for MAE vs accuracy balance
+        "price_loss_weight_raw": trial.suggest_float("price_loss_weight_raw", 0.1, 0.9, step=0.01),
+        "direction_loss_weight_raw": trial.suggest_float("direction_loss_weight_raw", 0.1, 0.9, step=0.01),
         
-        # Direction threshold
-        "direction_threshold": trial.suggest_float("direction_threshold", 0.3, 0.7),
+        # Huber loss parameter - important for price prediction robustness
+        "huber_delta": trial.suggest_float("huber_delta", 0.01, 5.0, step=0.01),
         
-        # Optimizer parameters
-        "learning_rate": trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True),
-        "weight_decay": trial.suggest_float("weight_decay", 1e-7, 1e-2, log=True),
-        "optimizer_eps": trial.suggest_float("optimizer_eps", 1e-10, 1e-6, log=True),
+        # Direction threshold - affects classification boundary
+        "direction_threshold": trial.suggest_float("direction_threshold", 0.1, 0.9, step=0.01),
         
-        # Scheduler parameters
-        "scheduler_factor": trial.suggest_float("scheduler_factor", 0.2, 0.7),
-        "scheduler_patience": trial.suggest_categorical("scheduler_patience", [3, 5, 7, 10, 15]),
-        "scheduler_min_lr": trial.suggest_float("scheduler_min_lr", 1e-8, 1e-5, log=True),
+        # Optimizer parameters - comprehensive tuning
+        "learning_rate": trial.suggest_float("learning_rate", 1e-7, 1e-1, log=True),
+        "weight_decay": trial.suggest_float("weight_decay", 1e-8, 1e-1, log=True),
+        "optimizer_eps": trial.suggest_float("optimizer_eps", 1e-12, 1e-4, log=True),
         
-        # Training parameters
-        "max_epochs": trial.suggest_categorical("max_epochs", [50, 70, 100]),
-        "gradient_clip_val": trial.suggest_float("gradient_clip_val", 0.5, 3.0),
-        "early_stopping_patience": trial.suggest_categorical("early_stopping_patience", [10, 15, 20, 25]),
-        "early_stopping_delta": trial.suggest_float("early_stopping_delta", 1e-6, 1e-2, log=True),
+        # Scheduler parameters - learning rate control
+        "scheduler_mode": trial.suggest_categorical("scheduler_mode", ["min", "max"]),
+        "scheduler_factor": trial.suggest_float("scheduler_factor", 0.1, 0.9, step=0.01),
+        "scheduler_patience": trial.suggest_categorical("scheduler_patience", [2, 3, 5, 7, 10, 15, 20]),
+        "scheduler_min_lr": trial.suggest_float("scheduler_min_lr", 1e-10, 1e-4, log=True),
+        
+        # Training parameters - comprehensive control
+        "max_epochs": trial.suggest_categorical("max_epochs", [30, 40, 50, 60, 70, 80, 100, 120]),
+        "gradient_clip_val": trial.suggest_float("gradient_clip_val", 0.1, 5.0, step=0.1),
+        "early_stopping_patience": trial.suggest_categorical("early_stopping_patience", [5, 8, 10, 12, 15, 20, 25, 30]),
+        "early_stopping_delta": trial.suggest_float("early_stopping_delta", 1e-8, 1e-1, log=True),
+        
+        # Data module parameters - affect model input
+        "batch_size": trial.suggest_categorical("batch_size", [16, 32, 48, 64, 96, 128]),
+        "window_size": trial.suggest_categorical("window_size", [5, 7, 10, 15, 20, 25]),
+        
+        # CNN architecture choices
+        "num_classes": trial.suggest_categorical("num_classes", [3]),  # Keep as 3 for your setup
+        "output_size": trial.suggest_categorical("output_size", [1]),  # Keep as 1 for regression
     }
 
 def get_ray_tune_search_space():
     """
-    Fallback Ray Tune search space if OptunaSearch is not available
+    Exhaustive Ray Tune search space fallback if OptunaSearch is not available.
+    Matches the comprehensive Optuna search space.
     """
     return {
-        # CNN Architecture parameters
-        "cnn_ch1": tune.choice([16, 32, 64, 128]),
-        "cnn_ch2": tune.choice([32, 64, 128, 256]),
-        "cnn_ch3": tune.choice([16, 32, 64, 128]),
+        # CNN Architecture parameters - comprehensive ranges
+        "cnn_ch1": tune.choice([8, 16, 24, 32, 48, 64, 96, 128]),
+        "cnn_ch2": tune.choice([16, 32, 48, 64, 96, 128, 192, 256]),
+        "cnn_ch3": tune.choice([8, 16, 24, 32, 48, 64, 96, 128]),
         
-        # Kernel sizes
-        "kernel1": tune.choice([2, 3, 5]),
-        "kernel2": tune.choice([2, 3, 5]),
-        "kernel3": tune.choice([2, 3, 4]),
+        # Kernel sizes - expanded range
+        "kernel1": tune.choice([1, 2, 3, 4, 5, 7]),
+        "kernel2": tune.choice([1, 2, 3, 4, 5, 7]),
+        "kernel3": tune.choice([1, 2, 3, 4, 5]),
         
-        # Pooling
-        "pool1": tune.choice([2, 3, 4]),
-        "pool2": tune.choice([2, 3, 4]),
-        "pool3": tune.choice([2, 3, 4]),
+        # Padding configurations
+        "padding1": tune.choice([0, 1, 2, 3]),
+        "padding2": tune.choice([0, 1, 2, 3]),
+        "padding3": tune.choice([0, 1, 2, 3]),
         
-        # Pool padding
-        "pool_pad1": tune.choice([0, 1]),
-        "pool_pad2": tune.choice([0, 1]),
-        "pool_pad3": tune.choice([0, 1]),
+        # Pooling configurations
+        "pool1": tune.choice([1, 2, 3, 4, 5]),
+        "pool2": tune.choice([1, 2, 3, 4, 5]),
+        "pool3": tune.choice([1, 2, 3, 4, 5]),
         
-        # Dropout rates
-        "dropout1": tune.uniform(0.1, 0.6),
-        "dropout2": tune.uniform(0.2, 0.7),
+        # CNN stride
+        "cnn_stride": tune.choice([1, 2]),
         
-        # Ridge parameters
-        "ridge_alpha": tune.loguniform(1e-3, 1e1),
-        "ridge_fit_intercept": tune.choice([True, False]),
+        # Dropout rates - fine-grained control
+        "dropout1": tune.uniform(0.05, 0.7),
+        "dropout2": tune.uniform(0.1, 0.8),
         
-        # ElasticNet parameters
-        "elastic_alpha": tune.loguniform(1e-5, 1e2),
-        "elastic_l1_ratio": tune.uniform(0.01, 0.99),
-        "elastic_max_iter": tune.choice([500, 1000, 2000]),
-        "elastic_tol": tune.loguniform(1e-6, 1e-2),
-        "elastic_eps": tune.loguniform(1e-10, 1e-6),
+        # Ridge parameters - expanded range
+        "ridge_alpha": tune.loguniform(1e-4, 1e2),
+        "ridge_eps": tune.loguniform(1e-10, 1e-6),
         
-        # Ensemble weights (raw values, will be normalized)
-        "price_cnn_weight_raw": tune.uniform(0.05, 0.5),
-        "ridge_weight_raw": tune.uniform(0.5, 1.5),
-        "direction_cnn_weight_raw": tune.uniform(0.3, 0.8),
-        "elastic_weight_raw": tune.uniform(0.5, 1.2),
+        # ElasticNet parameters - comprehensive tuning
+        "elastic_alpha": tune.loguniform(1e-6, 1e3),
+        "elastic_l1_ratio": tune.uniform(0.001, 0.999),
+        "elastic_max_iter": tune.choice([200, 500, 1000, 1500, 2000, 3000]),
+        "elastic_tol": tune.loguniform(1e-8, 1e-2),
+        "elastic_eps": tune.loguniform(1e-12, 1e-5),
         
-        # Loss weights (raw values, will be normalized)
-        "price_loss_weight_raw": tune.uniform(0.2, 0.8),
-        "direction_loss_weight_raw": tune.uniform(0.2, 0.8),
+        # Ensemble weights - fine-grained control for balance
+        "price_cnn_weight_raw": tune.uniform(0.01, 2.0),
+        "ridge_weight_raw": tune.uniform(0.01, 2.0),
+        "direction_cnn_weight_raw": tune.uniform(0.01, 2.0),
+        "elastic_weight_raw": tune.uniform(0.01, 2.0),
         
-        # Huber loss parameter
-        "huber_delta": tune.uniform(0.1, 2.0),
+        # Loss weights - critical for MAE vs accuracy balance
+        "price_loss_weight_raw": tune.uniform(0.1, 0.9),
+        "direction_loss_weight_raw": tune.uniform(0.1, 0.9),
         
-        # Direction threshold
-        "direction_threshold": tune.uniform(0.3, 0.7),
+        # Huber loss parameter - important for price prediction robustness
+        "huber_delta": tune.uniform(0.01, 5.0),
         
-        # Optimizer parameters
-        "learning_rate": tune.loguniform(1e-6, 1e-2),
-        "weight_decay": tune.loguniform(1e-7, 1e-2),
-        "optimizer_eps": tune.loguniform(1e-10, 1e-6),
+        # Direction threshold - affects classification boundary
+        "direction_threshold": tune.uniform(0.1, 0.9),
         
-        # Scheduler parameters
-        "scheduler_factor": tune.uniform(0.2, 0.7),
-        "scheduler_patience": tune.choice([3, 5, 7, 10, 15]),
-        "scheduler_min_lr": tune.loguniform(1e-8, 1e-5),
+        # Optimizer parameters - comprehensive tuning
+        "learning_rate": tune.loguniform(1e-7, 1e-1),
+        "weight_decay": tune.loguniform(1e-8, 1e-1),
+        "optimizer_eps": tune.loguniform(1e-12, 1e-4),
         
-        # Training parameters
-        "max_epochs": tune.choice([50, 70, 100]),
-        "gradient_clip_val": tune.uniform(0.5, 3.0),
-        "early_stopping_patience": tune.choice([10, 15, 20, 25]),
-        "early_stopping_delta": tune.loguniform(1e-6, 1e-2),
+        # Scheduler parameters - learning rate control
+        "scheduler_mode": tune.choice(["min", "max"]),
+        "scheduler_factor": tune.uniform(0.1, 0.9),
+        "scheduler_patience": tune.choice([2, 3, 5, 7, 10, 15, 20]),
+        "scheduler_min_lr": tune.loguniform(1e-10, 1e-4),
+        
+        # Training parameters - comprehensive control
+        "max_epochs": tune.choice([30, 40, 50, 60, 70, 80, 100, 120]),
+        "gradient_clip_val": tune.uniform(0.1, 5.0),
+        "early_stopping_patience": tune.choice([5, 8, 10, 12, 15, 20, 25, 30]),
+        "early_stopping_delta": tune.loguniform(1e-8, 1e-1),
+        
+        # Data module parameters - affect model input
+        "batch_size": tune.choice([16, 32, 48, 64, 96, 128]),
+        "window_size": tune.choice([5, 7, 10, 15, 20, 25]),
+        
+        # CNN architecture choices
+        "num_classes": tune.choice([3]),  # Keep as 3 for your setup
+        "output_size": tune.choice([1]),  # Keep as 1 for regression
     }
 
 def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str, Any]) -> DictConfig:
     """
-    Update base config with trial parameters using proper YAML structure
+    Exhaustive update of base config with trial parameters using proper YAML structure.
+    Handles all parameters to find optimal balance between MAE and directional accuracy.
     """
     # Create a copy of base config
     cfg = OmegaConf.create(OmegaConf.to_yaml(base_cfg))
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     
-    # Update CNN parameters
+    # Update CNN parameters comprehensively
     cfg_dict['cnn']['cnnChannels'] = [
         trial_params["cnn_ch1"], 
         trial_params["cnn_ch2"], 
@@ -214,33 +240,36 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
         trial_params["kernel2"], 
         trial_params["kernel3"]
     ]
+    cfg_dict['cnn']['padding'] = [
+        trial_params.get("padding1", 1),
+        trial_params.get("padding2", 1), 
+        trial_params.get("padding3", 1)
+    ]
     cfg_dict['cnn']['poolSize'] = [
         trial_params["pool1"], 
         trial_params["pool2"], 
-        trial_params["pool3"]
+        trial_params.get("pool3", 3)
     ]
-    cfg_dict['cnn']['poolPadding'] = [
-        trial_params["pool_pad1"],
-        trial_params["pool_pad2"], 
-        trial_params["pool_pad3"]
-    ]
+    cfg_dict['cnn']['stride'] = trial_params.get("cnn_stride", 1)
     cfg_dict['cnn']['dropout'] = [
         trial_params["dropout1"], 
         trial_params["dropout2"]
     ]
+    cfg_dict['cnn']['num_classes'] = trial_params.get("num_classes", 3)
+    cfg_dict['cnn']['outputSize'] = trial_params.get("output_size", 1)
     
-    # Update Ridge parameters
+    # Update Ridge parameters comprehensively
     cfg_dict['Ridge']['alpha'] = trial_params["ridge_alpha"]
-    cfg_dict['Ridge']['fit_intercept'] = trial_params["ridge_fit_intercept"]
+    cfg_dict['Ridge']['eps'] = trial_params.get("ridge_eps", 1e-8)
     
-    # Update ElasticNet parameters
+    # Update ElasticNet parameters comprehensively
     cfg_dict['ElasticNet']['alpha'] = trial_params["elastic_alpha"]
     cfg_dict['ElasticNet']['l1_ratio'] = trial_params["elastic_l1_ratio"]
     cfg_dict['ElasticNet']['max_iter'] = trial_params["elastic_max_iter"]
     cfg_dict['ElasticNet']['tol'] = trial_params["elastic_tol"]
     cfg_dict['ElasticNet']['eps'] = trial_params["elastic_eps"]
     
-    # Normalize and update ensemble weights
+    # Normalize and update ensemble weights for optimal balance
     price_total = trial_params["price_cnn_weight_raw"] + trial_params["ridge_weight_raw"]
     cfg_dict['model']['price_cnn_weight'] = trial_params["price_cnn_weight_raw"] / price_total
     cfg_dict['model']['ridge_weight'] = trial_params["ridge_weight_raw"] / price_total
@@ -249,19 +278,21 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     cfg_dict['model']['direction_cnn_weight'] = trial_params["direction_cnn_weight_raw"] / direction_total
     cfg_dict['model']['elasticNet_weight'] = trial_params["elastic_weight_raw"] / direction_total
     
-    # Normalize and update loss weights
+    # Normalize and update loss weights - critical for MAE vs accuracy trade-off
     loss_total = trial_params["price_loss_weight_raw"] + trial_params["direction_loss_weight_raw"]
     cfg_dict['model']['price_loss_weight'] = trial_params["price_loss_weight_raw"] / loss_total
     cfg_dict['model']['direction_loss_weight'] = trial_params["direction_loss_weight_raw"] / loss_total
     
-    # Update other model parameters
+    # Update model parameters
     cfg_dict['model']['huber_delta'] = trial_params["huber_delta"]
     cfg_dict['model']['direction_threshold'] = trial_params["direction_threshold"]
     
-    # Update optimizer parameters
+    # Update optimizer parameters comprehensively
     cfg_dict['optimiser']['lr'] = trial_params["learning_rate"]
     cfg_dict['optimiser']['weightDecay'] = trial_params["weight_decay"]
     cfg_dict['optimiser']['eps'] = trial_params["optimizer_eps"]
+    cfg_dict['optimiser']['amsgrad'] = trial_params.get("optimizer_amsgrad", False)
+    cfg_dict['optimiser']['schedulerMode'] = trial_params.get("scheduler_mode", "min")
     cfg_dict['optimiser']['schedulerFactor'] = trial_params["scheduler_factor"]
     cfg_dict['optimiser']['schedulerPatience'] = trial_params["scheduler_patience"]
     cfg_dict['optimiser']['schedulerMinLR'] = trial_params["scheduler_min_lr"]
@@ -271,6 +302,10 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     cfg_dict['trainer']['gradient_clip_val'] = trial_params["gradient_clip_val"]
     cfg_dict['trainer']['early_stopping_patience'] = trial_params["early_stopping_patience"]
     cfg_dict['trainer']['early_stopping_delta'] = trial_params["early_stopping_delta"]
+    
+    # Update data module parameters that affect model performance
+    cfg_dict['data_module']['batch_size'] = trial_params.get("batch_size", 64)
+    cfg_dict['data_module']['window_size'] = trial_params.get("window_size", 10)
     
     return OmegaConf.create(cfg_dict)
 
@@ -549,12 +584,10 @@ def main(cfg: DictConfig):
     
     # Save the configuration
     Path(best_config_path).parent.mkdir(parents=True, exist_ok=True)
+    best_config_path = Path(repo_root / best_config_path).resolve()
     OmegaConf.save(best_cfg, best_config_path)
     
     logger.info(f"\n💾 Best configuration saved to: {best_config_path}")
-    logger.info("\n📊 To train the final model with these parameters:")
-    logger.info(f"   python train_final_model.py --config-path=../outputs --config-name=best_config_optuna_{metric}")
-    
     # Cleanup Ray
     ray.shutdown()
 
