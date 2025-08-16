@@ -22,7 +22,7 @@ cnn:
   cnnChannels: [32, 64, 32]  # Reduced capacity to prevent overfitting
   kernelSize: [3, 3, 2]
   poolSize: [2, 2, 3]  # Pooling after each CNN layer
-  poolPadding: [1, 1, 1]
+  poolPadding: [0, 0, 0]
   padding: [1, 1, 1]  # kernel_size // 2 for each dimension
   stride: 1
   dropout: [0.3, 0.5]
