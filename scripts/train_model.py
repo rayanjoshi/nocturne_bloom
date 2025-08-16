@@ -14,24 +14,27 @@ from scripts.logging_config import get_logger, setup_logging
 setup_logging(log_level="INFO", console_output=True, file_output=True)
 logger = get_logger("trainer")
 
-
-checkpoint_callback = ModelCheckpoint(
-    monitor="val_price_mae",
-    dirpath="../models",
-    filename="model-{epoch:02d}-{val_price_mae:.2f}",
-    save_top_k=1,
-    mode="min",
-)
-
 @hydra.main(version_base=None, config_path="../configs", config_name="trainer")
 def main(cfg: DictConfig):
+    script_dir = Path(__file__).parent
+    repo_root = script_dir.parent
+    
     logger.info("Starting training script with config: %s", cfg.trainer)
+
+    logger_save_path = Path(repo_root / "logs").resolve()
     wandb_logger = WandbLogger(
         project=cfg.trainer.project_name,
         name=cfg.trainer.run_name,
-        save_dir="../logs"
+        save_dir=logger_save_path,
     )
-    
+    checkpoint_save_path = Path(repo_root / "models").resolve()
+    checkpoint_callback = ModelCheckpoint(
+        monitor="val_price_mae",
+        dirpath=checkpoint_save_path,
+        filename="model-{epoch:02d}-{val_price_mae:.2f}",
+        save_top_k=1,
+        mode="min",
+    )
     # Configure early stopping from config
     early_stopping_patience = getattr(cfg.trainer, 'early_stopping_patience', 10)
     early_stopping_delta = getattr(cfg.trainer, 'early_stopping_delta', 0.005)
