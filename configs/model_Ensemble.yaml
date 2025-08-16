@@ -5,6 +5,7 @@ model:
   
   price_loss_weight: 0.5
   direction_loss_weight: 0.5
+  orthogonal_lambda: 0.1
   direction_threshold: 0.5
 
   price_cnn_weight: 0.07969888681024252

@@ -37,11 +37,17 @@ class MultiHeadCNN(nn.Module):
             nn.Dropout(cfg.cnn.dropout[0])
         )
         
-        self.sharedfeatures = nn.Sequential(
+        self.price_features = nn.Sequential(
             nn.Linear(cnnChannels[2], cnnChannels[1]),
             nn.ReLU(),
             nn.Dropout(cfg.cnn.dropout[1]),
             )
+        
+        self.direction_features = nn.Sequential(
+            nn.Linear(cnnChannels[2], cnnChannels[1]),
+            nn.ReLU(),
+            nn.Dropout(cfg.cnn.dropout[1]),
+        )
         
         self.pricehead = nn.Sequential(
             nn.Linear(cnnChannels[1], cnnChannels[2]),
@@ -63,10 +69,14 @@ class MultiHeadCNN(nn.Module):
         x = x.transpose(1, 2)
         x = self.cnn(x)
         x = x.squeeze(-1)
-        x = self.sharedfeatures(x)
-        price_pred = self.pricehead(x).squeeze(-1)
-        direction_pred = self.directionhead(x)
-        return price_pred, direction_pred
+        
+        price_features = self.price_features(x)
+        direction_features = self.direction_features(x)
+        
+        price_pred = self.pricehead(price_features).squeeze(-1)
+        direction_pred = self.directionhead(direction_features)
+
+        return price_pred, direction_pred, price_features, direction_features
 
 class RidgeRegressor(nn.Module):
     def __init__(self, cfg: DictConfig):
@@ -360,7 +370,21 @@ class EnsembleModule(L.LightningModule):
         self.elasticNet_fitted = False
         
         self.direction_threshold = cfg.model.get('direction_threshold', 0.5)
-    
+        
+    def orthogonal_loss(self, price_features, direction_features):
+        """
+        Penalizes cosine similarity between feature vectors to encourage orthogonality.
+        Args:
+            feat_price (torch.Tensor): Batch of feature vectors for price (shape: [batch_size, feature_dim]).
+            feat_direction (torch.Tensor): Batch of feature vectors for direction (shape: [batch_size, feature_dim]).
+        Returns:
+            torch.Tensor: Mean squared cosine similarity loss (scalar).
+        """
+        price_features = F.normalize(price_features, dim=-1)
+        direction_features = F.normalize(direction_features, dim=-1)
+        cos = torch.sum(price_features * direction_features, dim=-1)
+        return torch.mean(cos ** 2)
+
     def on_train_start(self):
         logger.info("on_train_start: Fitting Ridge and ElasticNet on all training data...")
         """Fit Ridge and ElasticNet on all training data at the start of training"""
@@ -394,7 +418,7 @@ class EnsembleModule(L.LightningModule):
         logger.debug("MultiHeadEnsemble forward pass with input shape: %s", x.shape)
         
         # CNN predictions (both heads)
-        cnn_price, cnn_direction_logits = self.cnn(x)
+        cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
         
         # Ridge price prediction
         ridge_price = None
@@ -438,48 +462,67 @@ class EnsembleModule(L.LightningModule):
         # Clamp price predictions to prevent extreme values
         final_price = torch.clamp(final_price, min=-1e6, max=1e6)
         
-        return final_price, final_direction
+        return final_price, final_direction, price_features, direction_features
         
     def training_step(self, batch, batch_idx):
         logger.debug("Training step: batch_idx=%d", batch_idx)
         x, price_y, direction_y = batch
-        price_pred, direction_pred = self(x)
+        price_pred, direction_pred, price_features, direction_features = self(x)
         if price_pred.dim() != price_y.dim():
             price_pred = price_pred.view_as(price_y)
+            
         price_loss = self.price_criterion(price_pred, price_y)
         direction_loss = self.direction_criterion(direction_pred, direction_y)
+        orthogonal_penalty = self.orthogonal_loss(price_features, direction_features)
+
         total_loss = (self.price_loss_weight * price_loss + 
-                     self.direction_loss_weight * direction_loss)
+                        self.direction_loss_weight * direction_loss +
+                        orthogonal_penalty * self.cfg.model.get("orthogonal_lambda", 0.1)
+                    )
+        
         self.mae_train.update(price_pred, price_y)
         self.rmse_train.update(price_pred, price_y)
         self.r2_train.update(price_pred, price_y)
+        
         direction_preds_class = torch.argmax(direction_pred, dim=1)
         self.direction_acc_train.update(direction_preds_class, direction_y)
         self.direction_f1_train.update(direction_preds_class, direction_y)
+        
         self.log('train_loss', total_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log('train_price_loss', price_loss, on_step=True, on_epoch=True)
         self.log('train_direction_loss', direction_loss, on_step=True, on_epoch=True)
+        
         return total_loss
     
     def validation_step(self, batch, batch_idx):
         logger.debug("Validation step: batch_idx=%d", batch_idx)
         x, price_y, direction_y = batch
-        price_pred, direction_pred = self(x)
+        price_pred, direction_pred, price_features, direction_features = self(x)
+
         if price_pred.dim() != price_y.dim():
             price_pred = price_pred.view_as(price_y)
+        
         price_loss = self.price_criterion(price_pred, price_y)
         direction_loss = self.direction_criterion(direction_pred, direction_y)
+        orthogonal_penalty = self.orthogonal_loss(price_features, direction_features)
+        
         total_loss = (self.price_loss_weight * price_loss + 
-                     self.direction_loss_weight * direction_loss)
+                        self.direction_loss_weight * direction_loss +
+                        orthogonal_penalty * self.cfg.model.get("orthogonal_lambda", 0.1)
+                    )
+        
         self.mae_val.update(price_pred, price_y)
         self.rmse_val.update(price_pred, price_y)
         self.r2_val.update(price_pred, price_y)
+        
         direction_preds_class = torch.argmax(direction_pred, dim=1)
         self.direction_acc_val.update(direction_preds_class, direction_y)
         self.direction_f1_val.update(direction_preds_class, direction_y)
+        
         self.log('val_loss', total_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('val_price_loss', price_loss, on_step=False, on_epoch=True)
         self.log('val_direction_loss', direction_loss, on_step=False, on_epoch=True)
+        
         return total_loss
         
     def on_train_epoch_end(self):
