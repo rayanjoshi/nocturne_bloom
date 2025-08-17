@@ -93,10 +93,10 @@ def optuna_search_space(trial):
         "elastic_eps": trial.suggest_float("elastic_eps", 1e-12, 1e-5, log=True),
         
         # Ensemble weights - fine-grained control for balance
-        "price_cnn_weight_raw": trial.suggest_float("price_cnn_weight_raw", 0.01, 2.0, step=0.01),
-        "ridge_weight_raw": trial.suggest_float("ridge_weight_raw", 0.01, 2.0, step=0.01),
-        "direction_cnn_weight_raw": trial.suggest_float("direction_cnn_weight_raw", 0.01, 2.0, step=0.01),
-        "elastic_weight_raw": trial.suggest_float("elastic_weight_raw", 0.01, 2.0, step=0.01),
+        "price_cnn_weight_raw": trial.suggest_float("price_cnn_weight_raw", 0.1, 2.0, step=0.01),
+        "ridge_weight_raw": trial.suggest_float("ridge_weight_raw", 0.1, 2.0, step=0.01),
+        "direction_cnn_weight_raw": trial.suggest_float("direction_cnn_weight_raw", 0.1, 2.0, step=0.01),
+        "elastic_weight_raw": trial.suggest_float("elastic_weight_raw", 0.1, 2.0, step=0.01),
         
         # Loss weights - critical for MAE vs accuracy balance
         "price_loss_weight_raw": trial.suggest_float("price_loss_weight_raw", 0.1, 0.9, step=0.01),
@@ -109,7 +109,6 @@ def optuna_search_space(trial):
         "direction_threshold": trial.suggest_float("direction_threshold", 0.1, 0.9, step=0.01),
         
         # Optimizer parameters - comprehensive tuning
-        "learning_rate": trial.suggest_float("learning_rate", 1e-7, 1e-1, log=True),
         "weight_decay": trial.suggest_float("weight_decay", 1e-8, 1e-1, log=True),
         "optimizer_eps": trial.suggest_float("optimizer_eps", 1e-12, 1e-4, log=True),
         
@@ -132,6 +131,13 @@ def optuna_search_space(trial):
         # CNN architecture choices
         "num_classes": trial.suggest_categorical("num_classes", [3]),  # Keep as 3 for your setup
         "output_size": trial.suggest_categorical("output_size", [1]),  # Keep as 1 for regression
+        # Meta-learning and optimizer params
+        "use_meta_learning": trial.suggest_categorical("use_meta_learning", [True, False]),
+        "include_base_losses": trial.suggest_categorical("include_base_losses", [True, False]),
+        "meta_price_loss_weight": trial.suggest_float("meta_price_loss_weight", 0.5, 2.0, step=0.05),
+        "meta_direction_loss_weight": trial.suggest_float("meta_direction_loss_weight", 0.5, 2.0, step=0.05),
+        "base_lr": trial.suggest_float("base_lr", 1e-7, 1e-2, log=True),
+        "meta_lr": trial.suggest_float("meta_lr", 1e-7, 1e-2, log=True),
     }
 
 def get_ray_tune_search_space():
@@ -179,11 +185,10 @@ def get_ray_tune_search_space():
         "elastic_eps": tune.loguniform(1e-12, 1e-5),
         
         # Ensemble weights - fine-grained control for balance
-        "price_cnn_weight_raw": tune.uniform(0.01, 2.0),
-        "ridge_weight_raw": tune.uniform(0.01, 2.0),
-        "direction_cnn_weight_raw": tune.uniform(0.01, 2.0),
-        "elastic_weight_raw": tune.uniform(0.01, 2.0),
-        
+        "price_cnn_weight_raw": tune.uniform(0.1, 2.0),
+        "ridge_weight_raw": tune.uniform(0.1, 2.0),
+        "direction_cnn_weight_raw": tune.uniform(0.1, 2.0),
+        "elastic_weight_raw": tune.uniform(0.1, 2.0),
         # Loss weights - critical for MAE vs accuracy balance
         "price_loss_weight_raw": tune.uniform(0.1, 0.9),
         "direction_loss_weight_raw": tune.uniform(0.1, 0.9),
@@ -195,7 +200,6 @@ def get_ray_tune_search_space():
         "direction_threshold": tune.uniform(0.1, 0.9),
         
         # Optimizer parameters - comprehensive tuning
-        "learning_rate": tune.loguniform(1e-7, 1e-1),
         "weight_decay": tune.loguniform(1e-8, 1e-1),
         "optimizer_eps": tune.loguniform(1e-12, 1e-4),
         
@@ -218,6 +222,11 @@ def get_ray_tune_search_space():
         # CNN architecture choices
         "num_classes": tune.choice([3]),  # Keep as 3 for your setup
         "output_size": tune.choice([1]),  # Keep as 1 for regression
+        # Meta-learning and optimizer params
+        "meta_price_loss_weight": tune.uniform(0.5, 2.0),
+        "meta_direction_loss_weight": tune.uniform(0.5, 2.0),
+        "base_lr": tune.loguniform(1e-7, 1e-2),
+        "meta_lr": tune.loguniform(1e-7, 1e-2),
     }
 
 def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str, Any]) -> DictConfig:
@@ -286,12 +295,16 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     # Update model parameters
     cfg_dict['model']['huber_delta'] = trial_params["huber_delta"]
     cfg_dict['model']['direction_threshold'] = trial_params["direction_threshold"]
+    # Meta-learning and optimizer params
+
+    cfg_dict['model']['meta_price_loss_weight'] = trial_params.get("meta_price_loss_weight", cfg_dict['model'].get('meta_price_loss_weight', 1.0))
+    cfg_dict['model']['meta_direction_loss_weight'] = trial_params.get("meta_direction_loss_weight", cfg_dict['model'].get('meta_direction_loss_weight', 1.0))
+    cfg_dict['optimiser']['base_lr'] = trial_params.get("base_lr", cfg_dict['optimiser'].get('base_lr', 1e-3))
+    cfg_dict['optimiser']['meta_lr'] = trial_params.get("meta_lr", cfg_dict['optimiser'].get('meta_lr', 1e-3))
     
     # Update optimizer parameters comprehensively
-    cfg_dict['optimiser']['lr'] = trial_params["learning_rate"]
     cfg_dict['optimiser']['weightDecay'] = trial_params["weight_decay"]
     cfg_dict['optimiser']['eps'] = trial_params["optimizer_eps"]
-    cfg_dict['optimiser']['amsgrad'] = trial_params.get("optimizer_amsgrad", False)
     cfg_dict['optimiser']['schedulerMode'] = trial_params.get("scheduler_mode", "min")
     cfg_dict['optimiser']['schedulerFactor'] = trial_params["scheduler_factor"]
     cfg_dict['optimiser']['schedulerPatience'] = trial_params["scheduler_patience"]
@@ -491,7 +504,8 @@ def main(cfg: DictConfig):
             "epoch"
         ],
         parameter_columns=[
-            "learning_rate",
+            "base_lr",
+            "meta_lr",
             "elastic_alpha",
             "ridge_alpha",
             "price_loss_weight_raw",
