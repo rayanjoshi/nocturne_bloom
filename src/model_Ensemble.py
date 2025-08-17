@@ -56,14 +56,14 @@ class MultiHeadCNN(nn.Module):
             nn.Linear(cnnChannels[2], 1)  # Output for price prediction
         )
         
-        num_classes = cfg.cnn.get('num_classes', 3)
+        num_classes = cfg.cnn.num_classes
         self.directionhead = nn.Sequential(
             nn.Linear(cnnChannels[1], cnnChannels[2]),
             nn.ReLU(),
             nn.Dropout(cfg.cnn.dropout[0]),
             nn.Linear(cnnChannels[2], num_classes)  # Output for direction prediction
         )
-
+        
     def forward(self, x):
         logger.debug("MultiHeadCNN forward pass with input shape: %s", x.shape)
         x = x.transpose(1, 2)
@@ -75,7 +75,7 @@ class MultiHeadCNN(nn.Module):
         
         price_pred = self.pricehead(price_features).squeeze(-1)
         direction_pred = self.directionhead(direction_features)
-
+        
         return price_pred, direction_pred, price_features, direction_features
 
 class RidgeRegressor(nn.Module):
@@ -187,7 +187,7 @@ class ElasticNetClassifier(nn.Module):
         self.max_iter = cfg.ElasticNet.get('max_iter', 1000)
         self.fit_intercept = cfg.ElasticNet.get('fit_intercept', True)
         self.eps = cfg.ElasticNet.get('eps', 1e-8)
-        self.num_classes = cfg.cnn.get('num_classes', 3)
+        self.num_classes = cfg.cnn.num_classes
 
         # ElasticNet parameters (will be set during fit)
         self.weights = nn.ParameterList()
@@ -314,6 +314,30 @@ class ElasticNetClassifier(nn.Module):
         logits = torch.cat(scores, dim=1)
         return logits
     
+class MetaPriceRegressor(nn.Module):
+    """
+    Linear regressor over base model outputs (CNN price, Ridge price, direction probs, elastic probs).
+    Acts like learned blending (ridge-like if you add weight_decay in optimizer).
+    """
+    def __init__(self, in_dim: int):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, 1)
+    
+    def forward(self, z):   # z: (B, in_dim)
+        return self.linear(z).squeeze(-1)  # (B,)
+    
+
+class MetaDirectionClassifier(nn.Module):
+    """
+    Linear classifier over base outputs (CNN logits/probs, Elastic logits/probs, optional prices).
+    """
+    def __init__(self, in_dim: int, num_classes: int):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, num_classes)
+    
+    def forward(self, z):   # z: (B, in_dim)
+        return self.linear(z)  # logits (B, C)
+    
 
 class EnsembleModule(L.LightningModule):
     """
@@ -321,20 +345,29 @@ class EnsembleModule(L.LightningModule):
     - CNN provides both price and direction predictions
     - Ridge complements price predictions
     - ElasticNet complements direction predictions
+    - Meta-learners to blend all predictions
     """
     def __init__(self, cfg: DictConfig):
         logger.info("Initializing EnsembleModule with config: %s", cfg.model)
         super().__init__()
         self.cfg = cfg
         
-        # CNN component
+        # NN components
         self.cnn = MultiHeadCNN(cfg)
-        
-        # Ridge component for price prediction
         self.ridge = RidgeRegressor(cfg)
-        
-        # ElasticNet component as direction classification
         self.elasticNet = ElasticNetClassifier(cfg)
+        
+        self.num_classes = cfg.cnn.num_classes
+        meta_in_dim_dir = 1 + 1 + self.num_classes + self.num_classes
+        meta_in_dim_price = 1 + 1 + self.num_classes + self.num_classes
+        self.meta_price = MetaPriceRegressor(in_dim=meta_in_dim_price)
+        self.meta_dir = MetaDirectionClassifier(in_dim=meta_in_dim_dir, num_classes=self.num_classes)
+        
+        # Meta-learning configurations
+        self.use_meta_learning = cfg.model.use_meta_learning
+        self.include_base_losses = self.cfg.model.include_base_losses
+        self.meta_price_loss_weight = cfg.model.meta_price_loss_weight
+        self.meta_direction_loss_weight = cfg.model.meta_direction_loss_weight
         
         # Ensemble weights
         self.price_cnn_weight = cfg.model.price_cnn_weight
@@ -359,18 +392,17 @@ class EnsembleModule(L.LightningModule):
         self.r2_val = R2Score()
         
         # Direction Metrics
-        self.direction_acc_train = Accuracy(task="multiclass", num_classes=3)
-        self.direction_f1_train = F1Score(task="multiclass", num_classes=3, average='weighted')
-        self.direction_acc_val = Accuracy(task="multiclass", num_classes=3)
-        self.direction_f1_val = F1Score(task="multiclass", num_classes=3, average='weighted')
-        
+        self.direction_acc_train = Accuracy(task="multiclass", num_classes=self.num_classes)
+        self.direction_f1_train = F1Score(task="multiclass", num_classes=self.num_classes, average='weighted')
+        self.direction_acc_val = Accuracy(task="multiclass", num_classes=self.num_classes)
+        self.direction_f1_val = F1Score(task="multiclass", num_classes=self.num_classes, average='weighted')
         
         # Flags to track if models have been fitted
         self.ridge_fitted = False
         self.elasticNet_fitted = False
         
-        self.direction_threshold = cfg.model.get('direction_threshold', 0.5)
-        
+        self.direction_threshold = cfg.model.direction_threshold
+    
     def orthogonal_loss(self, price_features, direction_features):
         """
         Penalizes cosine similarity between feature vectors to encourage orthogonality.
@@ -384,34 +416,84 @@ class EnsembleModule(L.LightningModule):
         direction_features = F.normalize(direction_features, dim=-1)
         cos = torch.sum(price_features * direction_features, dim=-1)
         return torch.mean(cos ** 2)
-
+    
+    def build_meta_features(self, x, cnn_price, cnn_dir_logits):
+        """
+        Returns:
+            z_price: (B, in_dim_price)
+            z_dir:   (B, in_dim_dir)
+        """
+        B = cnn_price.shape[0]
+        device = cnn_price.device
+            
+        # CNN direction probs
+        cnn_dir_probs = F.softmax(cnn_dir_logits, dim=1)
+            
+        # Ridge price
+        if self.ridge_fitted and self.ridge.is_fitted:
+            ridge_price = self.ridge(x)
+            ridge_price = ridge_price.view(-1, 1)
+        else:
+            ridge_price = torch.zeros(B, 1, device=device)
+            
+        # ElasticNet logits -> probs
+        if self.elasticNet_fitted and self.elasticNet.is_fitted:
+            en_logits = self.elasticNet(x)
+            en_probs = F.softmax(en_logits, dim=1)
+        else:
+            en_probs = torch.zeros(B, self.num_classes, device=device)
+        
+        # Assemble meta inputs
+        z_price = torch.cat([
+            cnn_price.view(-1, 1),     # (B,1)
+            ridge_price,               # (B,1) or zeros
+            cnn_dir_probs,             # (B,C)
+            en_probs                   # (B,C) or zeros
+        ], dim=1)
+            
+        z_dir = torch.cat([
+            cnn_price.view(-1, 1),
+            ridge_price,
+            cnn_dir_probs,
+            en_probs
+        ], dim=1)
+        
+        return z_price, z_dir
+    
     def on_train_start(self):
         logger.info("on_train_start: Fitting Ridge and ElasticNet on all training data...")
         """Fit Ridge and ElasticNet on all training data at the start of training"""
+        
         if not (self.ridge_fitted and self.elasticNet_fitted):
             logger.info("Fitting Ridge and ElasticNet on all training data...")
             train_dataloader = self.trainer.datamodule.train_dataloader()
+            
             device = next(self.parameters()).device
             x_all = []
             price_y_all = []
             direction_y_all = []
+            
             with torch.no_grad():
                 for batch in train_dataloader:
                     x, price_y, direction_y = batch
                     x_all.append(x)
                     price_y_all.append(price_y.to(device))
                     direction_y_all.append(direction_y.to(device))
+                    
                 x_all = torch.cat(x_all, dim=0).to(device)
                 price_y_all = torch.cat(price_y_all, dim=0).to(device)
                 direction_y_all = torch.cat(direction_y_all, dim=0).to(device)
+                
             if not self.ridge_fitted:
                 self.ridge.fit(x_all, price_y_all)
                 self.ridge_fitted = True
                 print(f"Ridge fitted on {len(price_y_all)} samples!")
+                
             if not self.elasticNet_fitted:
                 self.elasticNet.fit(x_all, direction_y_all)
                 self.elasticNet_fitted = True
                 print(f"ElasticNet fitted on {len(direction_y_all)} samples!")
+                
     
     def forward(self, x):
         """Forward pass combining all model predictions"""
@@ -420,64 +502,88 @@ class EnsembleModule(L.LightningModule):
         # CNN predictions (both heads)
         cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
         
-        # Ridge price prediction
-        ridge_price = None
-        if self.ridge_fitted and self.ridge.is_fitted:
-            try:
-                ridge_price = self.ridge(x)
-                if ridge_price.device != cnn_price.device:
-                    ridge_price = ridge_price.to(cnn_price.device)
-                if ridge_price.shape != cnn_price.shape:
-                    ridge_price = ridge_price.view_as(cnn_price)
-            except Exception as e:
-                logger.warning(f"Ridge prediction failed: {e}, using CNN only")
-                ridge_price = None
-        
-        # ElasticNet direction prediction
-        elasticNet_direction = None
-        if self.elasticNet_fitted and self.elasticNet.is_fitted:
-            try:
-                elasticNet_direction = self.elasticNet(x)
-                if elasticNet_direction.device != cnn_direction_logits.device:
-                    elasticNet_direction = elasticNet_direction.to(cnn_direction_logits.device)
-                if elasticNet_direction.shape != cnn_direction_logits.shape:
-                    elasticNet_direction = elasticNet_direction.view_as(cnn_direction_logits)
-            except Exception as e:
-                logger.warning(f"ElasticNet prediction failed: {e}, using CNN only")
-                elasticNet_direction = None
-        
-        # Combine predictions
-        if ridge_price is not None:
-            final_price = (self.price_cnn_weight * cnn_price + 
-                          self.price_ridge_weight * ridge_price)
+        if self.use_meta_learning:
+            z_price, z_dir = self.build_meta_features(x, cnn_price, cnn_direction_logits)
+            
+            meta_price = self.meta_price(z_price)
+            meta_direction_logits = self.meta_dir(z_dir)
+            
+            final_price = torch.clamp(meta_price, min=-1e6, max=1e6)
+            final_direction = meta_direction_logits
         else:
-            final_price = cnn_price
-        
-        if elasticNet_direction is not None:
-            final_direction = (self.direction_cnn_weight * cnn_direction_logits + 
-                              self.direction_elasticNet_weight * elasticNet_direction)
-        else:
-            final_direction = cnn_direction_logits
-        
-        # Clamp price predictions to prevent extreme values
-        final_price = torch.clamp(final_price, min=-1e6, max=1e6)
+            # Ridge price prediction
+            ridge_price = None
+            if self.ridge_fitted and self.ridge.is_fitted:
+                try:
+                    ridge_price = self.ridge(x)
+                    if ridge_price.device != cnn_price.device:
+                        ridge_price = ridge_price.to(cnn_price.device)
+                    if ridge_price.shape != cnn_price.shape:
+                        ridge_price = ridge_price.view_as(cnn_price)
+                except Exception as e:
+                    logger.warning(f"Ridge prediction failed: {e}, using CNN only")
+                    ridge_price = None
+            
+            # ElasticNet direction prediction
+            elasticNet_direction = None
+            if self.elasticNet_fitted and self.elasticNet.is_fitted:
+                try:
+                    elasticNet_direction = self.elasticNet(x)
+                    if elasticNet_direction.device != cnn_direction_logits.device:
+                        elasticNet_direction = elasticNet_direction.to(cnn_direction_logits.device)
+                    if elasticNet_direction.shape != cnn_direction_logits.shape:
+                        elasticNet_direction = elasticNet_direction.view_as(cnn_direction_logits)
+                except Exception as e:
+                    logger.warning(f"ElasticNet prediction failed: {e}, using CNN only")
+                    elasticNet_direction = None
+            
+            # Combine predictions
+            if ridge_price is not None:
+                final_price = (self.price_cnn_weight * cnn_price + 
+                            self.price_ridge_weight * ridge_price)
+            else:
+                final_price = cnn_price
+            
+            if elasticNet_direction is not None:
+                final_direction = (self.direction_cnn_weight * cnn_direction_logits + 
+                                self.direction_elasticNet_weight * elasticNet_direction)
+            else:
+                final_direction = cnn_direction_logits
+            
+            # Clamp price predictions to prevent extreme values
+            final_price = torch.clamp(final_price, min=-1e6, max=1e6)
         
         return final_price, final_direction, price_features, direction_features
         
     def training_step(self, batch, batch_idx):
-        logger.debug("Training step: batch_idx=%d", batch_idx)
+        logger.debug(f"Training step: batch_idx={batch_idx}")
+        
         x, price_y, direction_y = batch
+        
         price_pred, direction_pred, price_features, direction_features = self(x)
+        if self.include_base_losses:
+            cnn_price, cnn_direction_logits, _, _ = self(x)
+
+        
         if price_pred.dim() != price_y.dim():
             price_pred = price_pred.view_as(price_y)
-            
-        price_loss = self.price_criterion(price_pred, price_y)
-        direction_loss = self.direction_criterion(direction_pred, direction_y)
+        
+        meta_price_loss = self.price_criterion(price_pred, price_y)
+        meta_direction_loss = self.direction_criterion(direction_pred, direction_y)
+        
+        base_losses = 0.0
+        if self.include_base_losses:
+            if cnn_price.dim() != price_y.dim():
+                cnn_price = cnn_price.view_as(price_y)
+            base_price_loss = self.price_criterion(cnn_price, price_y)
+            base_direction_loss = self.direction_criterion(cnn_direction_logits, direction_y)
+            base_losses = self.price_loss_weight * base_price_loss + self.direction_loss_weight * base_direction_loss
+        
         orthogonal_penalty = self.orthogonal_loss(price_features, direction_features)
-
-        total_loss = (self.price_loss_weight * price_loss + 
-                        self.direction_loss_weight * direction_loss +
-                        orthogonal_penalty * self.cfg.model.get("orthogonal_lambda", 0.1)
+        
+        total_loss = (self.price_loss_weight * meta_price_loss + 
+                        self.direction_loss_weight * meta_direction_loss + base_losses +
+                        orthogonal_penalty * self.cfg.model.orthogonal_lambda
                     )
         
         self.mae_train.update(price_pred, price_y)
@@ -489,26 +595,40 @@ class EnsembleModule(L.LightningModule):
         self.direction_f1_train.update(direction_preds_class, direction_y)
         
         self.log('train_loss', total_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log('train_price_loss', price_loss, on_step=True, on_epoch=True)
-        self.log('train_direction_loss', direction_loss, on_step=True, on_epoch=True)
+        self.log('train_price_loss', meta_price_loss, on_step=True, on_epoch=True)
+        self.log('train_direction_loss', meta_direction_loss, on_step=True, on_epoch=True)
+        if self.include_base_losses:
+            self.log('train_base_losses', base_losses, on_step=True, on_epoch=True)
         
         return total_loss
     
     def validation_step(self, batch, batch_idx):
-        logger.debug("Validation step: batch_idx=%d", batch_idx)
+        logger.debug(f"Validation step: batch_idx={batch_idx}")
+        
         x, price_y, direction_y = batch
         price_pred, direction_pred, price_features, direction_features = self(x)
-
+        if self.include_base_losses:
+            cnn_price, cnn_direction_logits, _, _ = self(x)
+        
         if price_pred.dim() != price_y.dim():
             price_pred = price_pred.view_as(price_y)
         
-        price_loss = self.price_criterion(price_pred, price_y)
-        direction_loss = self.direction_criterion(direction_pred, direction_y)
+        meta_price_loss = self.price_criterion(price_pred, price_y)
+        meta_direction_loss = self.direction_criterion(direction_pred, direction_y)
+        
+        base_losses = 0.0
+        if self.include_base_losses:
+            if cnn_price.dim() != price_y.dim():
+                cnn_price = cnn_price.view_as(price_y)
+            base_price_loss = self.price_criterion(cnn_price, price_y)
+            base_direction_loss = self.direction_criterion(cnn_direction_logits, direction_y)
+            base_losses = self.price_loss_weight * base_price_loss + self.direction_loss_weight * base_direction_loss
+        
         orthogonal_penalty = self.orthogonal_loss(price_features, direction_features)
         
-        total_loss = (self.price_loss_weight * price_loss + 
-                        self.direction_loss_weight * direction_loss +
-                        orthogonal_penalty * self.cfg.model.get("orthogonal_lambda", 0.1)
+        total_loss = (self.price_loss_weight * meta_price_loss + 
+                        self.direction_loss_weight * meta_direction_loss + base_losses +
+                        orthogonal_penalty * self.cfg.model.orthogonal_lambda
                     )
         
         self.mae_val.update(price_pred, price_y)
@@ -520,8 +640,10 @@ class EnsembleModule(L.LightningModule):
         self.direction_f1_val.update(direction_preds_class, direction_y)
         
         self.log('val_loss', total_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_price_loss', price_loss, on_step=False, on_epoch=True)
-        self.log('val_direction_loss', direction_loss, on_step=False, on_epoch=True)
+        self.log('val_price_loss', meta_price_loss, on_step=False, on_epoch=True)
+        self.log('val_direction_loss', meta_direction_loss, on_step=False, on_epoch=True)
+        if self.include_base_losses:
+            self.log('val_base_losses', base_losses, on_step=False, on_epoch=True)
         
         return total_loss
         
@@ -532,7 +654,7 @@ class EnsembleModule(L.LightningModule):
         price_mae = self.mae_train.compute()
         price_rmse = torch.sqrt(self.rmse_train.compute())
         price_r2 = self.r2_train.compute()
-
+        
         # Direction metrics
         direction_acc = self.direction_acc_train.compute()
         direction_f1 = self.direction_f1_train.compute()
@@ -544,11 +666,14 @@ class EnsembleModule(L.LightningModule):
         self.log('train_direction_acc', direction_acc, prog_bar=True)
         self.log('train_direction_f1', direction_f1, prog_bar=True)
         
-        print(f"\n --------- Training Results ---------")
-        print(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
-        print(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
-        print(f"Models Fitted - Ridge: {self.ridge_fitted}, ElasticNet: {self.elasticNet_fitted}")
-        print(f"--------- Training Complete ---------\n")
+        meta_status = "enabled" if self.use_meta_learning else "disabled"
+        
+        logger.info(f"\n --------- Training Results ---------")
+        logger.info(f"Meta-learning: {meta_status}")
+        logger.info(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
+        logger.info(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
+        logger.info(f"Models Fitted - Ridge: {self.ridge_fitted}, ElasticNet: {self.elasticNet_fitted}")
+        logger.info(f"--------- Training Complete ---------\n")
         
         # Reset metrics
         self.mae_train.reset()
@@ -576,10 +701,13 @@ class EnsembleModule(L.LightningModule):
         self.log('val_direction_acc', direction_acc, prog_bar=True)
         self.log('val_direction_f1', direction_f1, prog_bar=True)
         
-        print(f"\n --------- Validation Results ---------")
-        print(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
-        print(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
-        print(f"--------- Validation Complete ---------\n")
+        meta_status = "enabled" if self.use_meta_learning else "disabled"
+        
+        logger.info(f"\n --------- Validation Results ---------")
+        logger.info(f"Meta-learning: {meta_status}")
+        logger.info(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
+        logger.info(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
+        logger.info(f"--------- Validation Complete ---------\n")
         
         # Reset metrics
         self.mae_val.reset()
@@ -594,12 +722,12 @@ class EnsembleModule(L.LightningModule):
     
     def on_test_epoch_end(self):
         logger.info("Test epoch ended. Computing test metrics.")
-
+        
         # Price metrics
         price_mae = self.mae_val.compute()
         price_rmse = torch.sqrt(self.rmse_val.compute())
         price_r2 = self.r2_val.compute()
-
+        
         # Direction metrics
         direction_acc = self.direction_acc_val.compute()
         direction_f1 = self.direction_f1_val.compute()
@@ -611,11 +739,14 @@ class EnsembleModule(L.LightningModule):
         self.log('val_direction_acc', direction_acc, prog_bar=True)
         self.log('val_direction_f1', direction_f1, prog_bar=True)
         
-        print(f"\n --------- Test Results ---------")
-        print(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
-        print(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
-        print(f"--------- Test Complete ---------\n")
-
+        meta_status = "enabled" if self.use_meta_learning else "disabled"
+        
+        logger.info(f"\n --------- Test Results ---------")
+        logger.info(f"Meta-learning: {meta_status}")
+        logger.info(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
+        logger.info(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
+        logger.info(f"--------- Test Complete ---------\n")
+        
         # Reset metrics
         self.mae_val.reset()
         self.rmse_val.reset()
@@ -623,30 +754,105 @@ class EnsembleModule(L.LightningModule):
         self.direction_acc_val.reset()
         self.direction_f1_val.reset()
     
+    def get_base_predictions(self, x):
+        """
+        Get individual predictions from all base models.
+        Useful for analysis and debugging.
+        """
+        with torch.no_grad():
+            # CNN predictions
+            cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
+            cnn_direction_probs = F.softmax(cnn_direction_logits, dim=1)
+            
+            # Ridge predictions
+            ridge_price = None
+            if self.ridge_fitted and self.ridge.is_fitted:
+                ridge_price = self.ridge(x)
+            
+            # ElasticNet predictions
+            elasticNet_logits = None
+            elasticNet_probs = None
+            if self.elasticNet_fitted and self.elasticNet.is_fitted:
+                elasticNet_logits = self.elasticNet(x)
+                elasticNet_probs = F.softmax(elasticNet_logits, dim=1)
+            
+            return {
+                'cnn_price': cnn_price,
+                'cnn_direction_logits': cnn_direction_logits,
+                'cnn_direction_probs': cnn_direction_probs,
+                'ridge_price': ridge_price,
+                'elasticNet_logits': elasticNet_logits,
+                'elasticNet_probs': elasticNet_probs,
+                'price_features': price_features,
+                'direction_features': direction_features
+            }
+    
+    def get_meta_predictions(self, x):
+        """
+        Get meta-learner predictions.
+        """
+        if not self.use_meta_learning:
+            raise ValueError("Meta-learning is disabled. Use get_base_predictions() instead.")
+        
+        with torch.no_grad():
+            cnn_price, cnn_direction_logits, _, _ = self.cnn(x)
+            z_price, z_dir = self.build_meta_features(x, cnn_price, cnn_direction_logits)
+            
+            meta_price = self.meta_price(z_price)
+            meta_direction_logits = self.meta_dir(z_dir)
+            meta_direction_probs = F.softmax(meta_direction_logits, dim=1)
+            
+            return {
+                'meta_price': meta_price,
+                'meta_direction_logits': meta_direction_logits,
+                'meta_direction_probs': meta_direction_probs,
+                'meta_features_price': z_price,
+                'meta_features_direction': z_dir
+            }
+    
     def save_components(self):
         logger.info("Saving CNN and Elasticnet model components to disk.")
         script_dir = Path(__file__).parent  # /path/to/repo/src
         repo_root = script_dir.parent  # /path/to/repo/
-        direction_cnnPath = Path(repo_root / self.cfg.model.direction_cnnPath).resolve()
+        cnnPath = Path(repo_root / self.cfg.model.cnnPath).resolve()
         elasticNetPath = Path(repo_root / self.cfg.model.elasticNetPath).resolve()
-        price_cnnPath = Path(repo_root / self.cfg.model.price_cnnPath).resolve()
         ridgePath = Path(repo_root / self.cfg.model.ridgePath).resolve()
+        meta_price_path = Path(repo_root / self.cfg.model.meta_price_path).resolve()
+        meta_direction_path = Path(repo_root / self.cfg.model.meta_direction_path).resolve()
         
-        for path in [direction_cnnPath, elasticNetPath, price_cnnPath, ridgePath]:
+        for path in [cnnPath, elasticNetPath, ridgePath, meta_price_path, meta_direction_path]:
             path.parent.mkdir(parents=True, exist_ok=True)
         
-        torch.save(self.cnn.state_dict(), direction_cnnPath)
+        torch.save(self.cnn.state_dict(), cnnPath)
         torch.save(self.elasticNet.state_dict(), elasticNetPath)
-        torch.save(self.cnn.state_dict(), price_cnnPath)
         torch.save(self.ridge.state_dict(), ridgePath)
-        print(f"DirectionCNN model saved to {direction_cnnPath}, ElasticNet model saved to {elasticNetPath}")
-        print(f"PriceCNN model saved to {price_cnnPath}, and Ridge model saved to {ridgePath}.")
-
+        torch.save(self.meta_price.state_dict(), meta_price_path)
+        torch.save(self.meta_direction.state_dict(), meta_direction_path)
+        print(f"CNN model saved to {cnnPath}.")
+        print(f"Ridge model saved to {ridgePath}, ElasticNet model saved to {elasticNetPath}.")
+        print(f"Meta price model saved to {meta_price_path}, Meta direction model saved to {meta_direction_path}.")
+    
     def configure_optimizers(self):
         logger.info("Configuring optimizers and learning rate scheduler.")
+        
+        # Separate parameter groups for different learning rates if desired
+        base_params = list(self.cnn.parameters())
+        meta_params = []
+        
+        if self.use_meta_learning:
+            meta_params = list(self.meta_price.parameters()) + list(self.meta_dir.parameters())
+        
+        # You can set different learning rates for base and meta models
+        base_lr = self.cfg.optimiser.base_lr
+        meta_lr = self.cfg.optimiser.meta_lr
+        
+        param_groups = [{'params': base_params, 'lr': base_lr}]
+        
+        if meta_params:
+            param_groups.append({'params': meta_params, 'lr': meta_lr})
+            
         optimizer = torch.optim.Adam(
-            self.parameters(), 
-            lr=self.cfg.optimiser.lr, 
+            param_groups, 
             weight_decay=self.cfg.optimiser.weightDecay,
             eps=self.cfg.optimiser.eps  # Prevent division by zero
         )
@@ -657,8 +863,12 @@ class EnsembleModule(L.LightningModule):
             patience=self.cfg.optimiser.schedulerPatience,
             min_lr=self.cfg.optimiser.schedulerMinLR
         )
+        
+        gradient_clip_val = self.cfg.optimiser.gradient_clip_val
+        
         return {
             'optimizer': optimizer,
             'lr_scheduler': scheduler,
-            'monitor': 'val_loss'
+            'monitor': 'val_loss',
+            'gradient_clip_val': gradient_clip_val
         }

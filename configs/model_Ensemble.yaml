@@ -8,13 +8,19 @@ model:
   orthogonal_lambda: 0.1
   direction_threshold: 0.6772996319387364
 
+  use_meta_learning: true  # Enable/disable meta-learning
+  include_base_losses: true  # Include base model losses in training
+  meta_price_loss_weight: 1.0
+  meta_direction_loss_weight: 1.0
+  base_lr: 0.001  # Learning rate for base CNN
+  meta_lr: 0.001  # Learning rate for meta-learners
+
   price_cnn_weight: 0.008280024516058514
   direction_cnn_weight: 0.6429606793445979
   elasticNet_weight: 0.3570393206554022
   ridge_weight: 0.9917199754839415
-  
-  price_cnnPath: models/price_cnn_model.pth
-  direction_cnnPath: models/direction_cnn_model.pth
+
+  cnnPath: models/cnn_model.pth
   elasticNetPath: models/elastic_net_model.pth
   ridgePath: models/ridge_model.pth
 
@@ -45,11 +51,13 @@ ElasticNet:
 
 optimiser:
   name: 'adam'
-  lr: 5.352971946465524e-07
+  base_lr: 5.352971946465524e-07
+  meta_lr: 5.352971946465524e-07
   weightDecay: 7.338207963063604e-05  # L2 regularization term 
   eps: 1e-08 
   amsgrad: False  # Whether to use AMSGrad variant of Adam
   schedulerMode: 'min'
   schedulerFactor: 0.4285488488856397
   schedulerPatience: 3
-  schedulerMinLR: 1e-7 
+  schedulerMinLR: 1e-7
+  gradient_clip_val: 0.7953959208923174  # Gradient clipping to prevent exploding gradients
