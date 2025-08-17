@@ -62,4 +62,3 @@ optimiser:
   schedulerFactor: 0.4285488488856397
   schedulerPatience: 3
   schedulerMinLR: 1e-7
-  gradient_clip_val: 0.7953959208923174  # Gradient clipping to prevent exploding gradients

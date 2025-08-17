@@ -847,11 +847,8 @@ class EnsembleModule(L.LightningModule):
             min_lr=self.cfg.optimiser.schedulerMinLR
         )
         
-        gradient_clip_val = self.cfg.optimiser.gradient_clip_val
-        
         return {
             'optimizer': optimizer,
             'lr_scheduler': scheduler,
             'monitor': 'val_loss',
-            'gradient_clip_val': gradient_clip_val
         }

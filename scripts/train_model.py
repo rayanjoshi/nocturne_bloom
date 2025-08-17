@@ -59,6 +59,7 @@ def main(cfg: DictConfig):
         check_val_every_n_epoch=1,  # Run validation every epoch
         val_check_interval=1.0,     # Run validation at the end of each epoch
         deterministic = True,
+        gradient_clip_val = cfg.trainer.gradient_clip_val,
     )
     
     logger.info("Instantiating model and data module.")
