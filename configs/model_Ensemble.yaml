@@ -23,6 +23,8 @@ model:
   cnnPath: models/cnn_model.pth
   elasticNetPath: models/elastic_net_model.pth
   ridgePath: models/ridge_model.pth
+  meta_price_path: models/meta_price_model.pth
+  meta_direction_path: models/meta_direction_model.pth
 
 cnn:
   inputChannels: 96  # Number of features (RSI, MACD, etc.)
