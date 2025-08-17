@@ -591,7 +591,7 @@ def main(cfg: DictConfig):
         logger.info(f"{key}: {value}")
     
     # Save best configuration
-    best_config_path = f"../outputs/best_config_optuna_{metric}.yaml"
+    best_config_path = f"outputs/best_config_optuna_{metric}.yaml"
     
     # Create updated config with best parameters
     best_cfg = update_config_from_trial_params(cfg, best_result.config)
