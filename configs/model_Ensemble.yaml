@@ -1,17 +1,17 @@
 model:
   target_sequence_length: 1  # Predicting the next closing price
-  huber_delta: 0.579797487582631  # Delta for Huber loss, can be adjusted based on the dataset
+  huber_delta: 3.375053347314909  # Delta for Huber loss, can be adjusted based on the dataset
   # non-normalized weighted averaging of CNN and ElasticNet regression outputs #
   
-  price_loss_weight: 0.5
-  direction_loss_weight: 0.5
+  price_loss_weight: 0.5374976510146406
+  direction_loss_weight: 0.46250234898535936
   orthogonal_lambda: 0.1
-  direction_threshold: 0.5
+  direction_threshold: 0.6772996319387364
 
-  price_cnn_weight: 0.07969888681024252
-  direction_cnn_weight: 0.57969888681024252
-  elasticNet_weight: 0.8275966383353601
-  ridge_weight: 0.9923011131897575
+  price_cnn_weight: 0.008280024516058514
+  direction_cnn_weight: 0.6429606793445979
+  elasticNet_weight: 0.3570393206554022
+  ridge_weight: 0.9917199754839415
   
   price_cnnPath: models/price_cnn_model.pth
   direction_cnnPath: models/direction_cnn_model.pth
@@ -20,36 +20,36 @@ model:
 
 cnn:
   inputChannels: 96  # Number of features (RSI, MACD, etc.)
-  cnnChannels: [32, 64, 32]  # Reduced capacity to prevent overfitting
-  kernelSize: [3, 3, 2]
-  poolSize: [2, 2, 3]  # Pooling after each CNN layer
+  cnnChannels: [32, 256, 24]  # Reduced capacity to prevent overfitting
+  kernelSize: [1, 7, 1]
+  poolSize: [3, 3, 4]  # Pooling after each CNN layer
   poolPadding: [0, 0, 0]
-  padding: [1, 1, 1]  # kernel_size // 2 for each dimension
+  padding: [3, 1, 3]  # kernel_size // 2 for each dimension
   stride: 1
-  dropout: [0.3, 0.5]
+  dropout: [0.515627323593728, 0.2360123274777569]
   outputSize: 1
   num_classes: 3
 
 Ridge:
-  alpha: 0.1996926370318278  # Regularization strength for Ridge regression, can be adjusted based on the dataset
+  alpha: 0.18718827279837308  # Regularization strength for Ridge regression, can be adjusted based on the dataset
   fit_intercept: True
   eps: 1e-8
 
 ElasticNet:
-  alpha: 4.107946250476794  # Regularization strength for ElasticNet, can be adjusted based on the dataset
-  l1_ratio: 0.6187360071571415  # Mix ratio between L1 and L2 regularization
+  alpha: 0.002503496447192195  # Regularization strength for ElasticNet, can be adjusted based on the dataset
+  l1_ratio: 0.685877343128158  # Mix ratio between L1 and L2 regularization
   fit_intercept: True
-  tol: 6.581686807105016e-05  # Tolerance for stopping criteria
-  max_iter: 1000  # Maximum number of iterations
-  eps: 1.3516727693360534e-09
+  tol: 1.8211162220111712e-05  # Tolerance for stopping criteria
+  max_iter: 3000  # Maximum number of iterations
+  eps: 1.024197385303068e-09
 
 optimiser:
   name: 'adam'
-  lr: 6.0455189496240446e-05
-  weightDecay: 0.000529539419332929  # L2 regularization term 
+  lr: 5.352971946465524e-07
+  weightDecay: 7.338207963063604e-05  # L2 regularization term 
   eps: 1e-08 
   amsgrad: False  # Whether to use AMSGrad variant of Adam
   schedulerMode: 'min'
-  schedulerFactor: 0.5182833306194576
-  schedulerPatience: 15
+  schedulerFactor: 0.4285488488856397
+  schedulerPatience: 3
   schedulerMinLR: 1e-7 
