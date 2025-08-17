@@ -4,7 +4,7 @@ defaults:
   - data_module
 
 trainer:
-  project_name: "NVDA Stock Predictor - Experimental"
+  project_name: "NVDA Stock Predictor - Ensemble"
   run_name: "Ensemble Model"
   max_epochs: 40  # More epochs with early stopping
   accelerator: "auto"
