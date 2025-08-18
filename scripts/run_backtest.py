@@ -50,10 +50,10 @@ class DataProcessor:
     def data_module(self, dataFrame):
         self.logger.info(f"Converting features to tensors for {self.cfg.data_loader.TICKER}")
         window_size = self.cfg.data_module.window_size
-        target_col = self.cfg.data_module.target_col
+        target_cols = self.cfg.data_module.target_cols
 
-        features = dataFrame.drop(columns=[target_col])
-        target = dataFrame[target_col]
+        features = dataFrame.drop(columns=target_cols)
+        target = dataFrame["Price_Target"]
 
         x, y = [], []
         for i in range(window_size, len(dataFrame)):
@@ -103,18 +103,26 @@ class MakePredictions:
         self.logger.info(f"Loaded {len(x)} samples with shape {x.shape} and target shape {y.shape}")
         model = EnsembleModule(self.cfg)
 
-        cnnPath = repo_root / self.cfg.model.cnnPath.lstrip('../')
+        cnnPath = Path(repo_root / self.cfg.model.cnnPath).resolve()
         cnn_state_dict = torch.load(cnnPath)
         model.cnn.load_state_dict(cnn_state_dict)
-
+        
+        ridgePath = Path(repo_root / self.cfg.model.ridgePath).resolve()
+        ridge_state_dict = torch.load(ridgePath)
+        model.ridge.load_state_dict(ridge_state_dict)
+        model.ridge.is_fitted = True
+        
+        if self.cfg.model.use_meta_learning:
+            metaPricePath = Path(repo_root / self.cfg.model.meta_price_path).resolve()
+            metaPrice_state_dict = torch.load(metaPricePath)
+            model.meta_price.load_state_dict(metaPrice_state_dict)
+            
+            metaDirectionPath = Path(repo_root / self.cfg.model.meta_direction_path).resolve()
+            metaDirection_state_dict = torch.load(metaDirectionPath)
+            model.meta_dir.load_state_dict(metaDirection_state_dict)
+        
         ElasticNetPath = Path(repo_root / self.cfg.model.elasticNetPath).resolve()
         ElasticNet_state_dict = torch.load(ElasticNetPath)
-        weightShape = ElasticNet_state_dict['weight'].shape
-        self.logger.info(f"ElasticNet model weight shape: {weightShape}")
-        biasShape = ElasticNet_state_dict['bias'].shape
-        self.logger.info(f"ElasticNet model bias shape: {biasShape}")
-        model.elasticNet.weight.data = torch.zeros(weightShape, dtype=torch.float32)
-        model.elasticNet.bias.data = torch.zeros(biasShape, dtype=torch.float32)
         model.elasticNet.load_state_dict(ElasticNet_state_dict)
         model.elasticNet.is_fitted = True
 

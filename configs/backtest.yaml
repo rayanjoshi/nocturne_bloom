@@ -9,14 +9,14 @@ data_loader:
   END_DATE: "2024-12-31"
   WRDS_USERNAME: "rj524"
   raw_data_path: data/raw/nvda_raw_evaluate_data.csv
-  sql_save_path: ../src/WRDS_query.sql
+  sql_save_path: WRDS_query.sql
 
 features:
   preprocessing_data_path: data/preprocessing/nvda_preprocessed_evaluate_data.csv
 
 data_module:
   window_size: 10
-  target_col: "Price_Target"
+  target_cols: ["Price_Target", "Direction_Target"]
   feature_scaler_path: models/feature_scaler.pkl
   target_scaler_path: models/Price_Target_scaler.pkl
   x_scaled_save_path: data/processed/nvda_x_scaled_evaluate_data.pt
