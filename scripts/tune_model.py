@@ -388,7 +388,7 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
                 val_loss = val_results[0].get("val_loss", float('inf'))
                 
                 # Calculate multi-objective score
-                metric_calculator = MultiObjectiveMetric(mae_weight=0.5, acc_weight=0.5, mae_scale=1.0)
+                metric_calculator = MultiObjectiveMetric(mae_weight=0.3, acc_weight=0.7, mae_scale=1.0)
                 multi_objective_score = metric_calculator(val_mae, val_direction_acc)
                 
                 # Report all metrics
