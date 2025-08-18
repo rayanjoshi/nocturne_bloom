@@ -1,5 +1,5 @@
 data_module:
-  window_size: 7
+  window_size: 5
   price_target_col: Price_Target
   direction_target_col: Direction_Target
   x_save_path: data/processed/nvda_processed_x.pt
