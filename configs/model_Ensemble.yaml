@@ -6,7 +6,7 @@ model:
   price_loss_weight: 0.5374976510146406
   direction_loss_weight: 0.46250234898535936
   orthogonal_lambda: 0.1
-  direction_threshold: 0.13991362769473423
+  # Direction threshold is set during feature engineering.
 
   use_meta_learning: true  # Enable/disable meta-learning
   include_base_losses: true  # Include base model losses in training

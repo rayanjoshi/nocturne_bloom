@@ -357,7 +357,6 @@ class EnsembleModule(L.LightningModule):
         # Flags
         self.ridge_fitted = False
         self.elasticNet_fitted = False
-        self.direction_threshold = cfg.model.direction_threshold
         
     def _setup_metrics(self):
         # Price Metrics

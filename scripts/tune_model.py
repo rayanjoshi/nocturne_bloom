@@ -105,8 +105,6 @@ def optuna_search_space(trial):
         # Huber loss parameter - important for price prediction robustness
         "huber_delta": trial.suggest_float("huber_delta", 0.01, 5.0, step=0.01),
         
-        # Direction threshold - affects classification boundary
-        "direction_threshold": trial.suggest_float("direction_threshold", 0.1, 0.9, step=0.01),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": trial.suggest_float("weight_decay", 1e-8, 1e-1, log=True),
@@ -196,9 +194,6 @@ def get_ray_tune_search_space():
         
         # Huber loss parameter - important for price prediction robustness
         "huber_delta": tune.uniform(0.01, 5.0),
-        
-        # Direction threshold - affects classification boundary
-        "direction_threshold": tune.uniform(0.1, 0.9),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": tune.loguniform(1e-8, 1e-1),
@@ -296,7 +291,6 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     
     # Update model parameters
     cfg_dict['model']['huber_delta'] = trial_params["huber_delta"]
-    cfg_dict['model']['direction_threshold'] = trial_params["direction_threshold"]
     # Meta-learning and optimizer params
 
     cfg_dict['model']['meta_price_loss_weight'] = trial_params.get("meta_price_loss_weight", cfg_dict['model'].get('meta_price_loss_weight', 1.0))
