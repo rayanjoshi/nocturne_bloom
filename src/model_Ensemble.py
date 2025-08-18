@@ -63,7 +63,10 @@ class MultiHeadCNN(nn.Module):
             nn.Linear(cnnChannels[1], cnnChannels[2]),
             nn.ReLU(),
             nn.Dropout(cfg.cnn.dropout[0]),
-            nn.Linear(cnnChannels[2], num_classes)
+            nn.Linear(cnnChannels[2], cnnChannels[2] * 2),
+            nn.ReLU(),
+            nn.Dropout(cfg.cnn.dropout[0]),
+            nn.Linear(cnnChannels[2] * 2, num_classes)
         )
         
     def forward(self, x):
@@ -93,8 +96,10 @@ class RidgeRegressor(nn.Module):
         self.register_buffer('bias', torch.tensor(0.0, requires_grad=False))
         self.is_fitted = False
         
-    def fit(self, X, y):
-        logger.info("Fitting RidgeRegressor on data: X shape %s, y shape %s", X.shape, y.shape)
+        self.fallback_count = 0  # Track fallback attempts
+        
+    def fit(self, X, y, rank=None):
+        logger.info(f"Fitting RidgeRegressor on data: X shape {X.shape}, y shape {y.shape}")
         
         device = X.device
         y = y.to(device).float()
@@ -112,27 +117,44 @@ class RidgeRegressor(nn.Module):
         else:
             XWithIntercept = X
         
-        # Ridge regression solution: (X^T X + α I)^(-1) X^T y
-        numFeatures = XWithIntercept.shape[1]
-        # Create identity matrix for regularization
-        I = torch.eye(numFeatures, device=device)
-        
-        # Ridge regression closed form solution
-        XtX = torch.mm(XWithIntercept.t(), XWithIntercept)
-        XtX_reg = XtX + self.alpha * I + (self.eps * I)
-        Xty = torch.mv(XWithIntercept.t(), y)
-        
-        # Solve the system with better error handling
+        # More stable Ridge regression using SVD decomposition
         try:
-            L = torch.linalg.cholesky(XtX_reg)
-            theta = torch.cholesky_solve(Xty.unsqueeze(1), L).squeeze(1)
-        except RuntimeError:
+            with torch.cuda.amp.autocast():
+                U, S, Vt = torch.linalg.svd(XWithIntercept, full_matrices=False)
+                if rank is not None:
+                    U, S, Vt = U[:, :rank], S[:rank], Vt[:rank, :]
+                
+                # Log condition number
+                condition_number = torch.max(S) / (torch.min(S) + self.eps)
+                logger.info(f"Matrix condition number: {condition_number:.4f}")
+
+                # Ridge solution using SVD
+                S_reg = S / (S**2 + self.alpha + self.eps)
+                theta = Vt.t() @ (S_reg.unsqueeze(1) * (U.t() @ y.unsqueeze(1))).squeeze(1)
+            
+        except torch.cuda.CudaError as e:
+            logger.error(f"GPU memory error during SVD: {e}")
+            raise
+        except RuntimeError as e:
+            self.fallback_count = getattr(self, 'fallback_count', 0) + 1
+            logger.warning(f"SVD failed (count: {self.fallback_count}, error: {e}), falling back to normal equations")
+            numFeatures = XWithIntercept.shape[1]
+            I = torch.eye(numFeatures, device=device)
+            
+            XtX = torch.mm(XWithIntercept.t(), XWithIntercept)
+            XtX_reg = XtX + (self.alpha + self.eps) * I
+            Xty = torch.mv(XWithIntercept.t(), y)
+            
             try:
                 theta = torch.linalg.solve(XtX_reg, Xty)
             except RuntimeError:
                 logger.warning("Using pseudo-inverse due to singular matrix")
                 theta = torch.linalg.pinv(XtX_reg) @ Xty
         
+        # Validate coefficients
+        if torch.any(torch.abs(theta) > 1e5):
+            logger.warning(f"Large coefficients detected: max |theta| = {torch.abs(theta).max()}")
+
         # Split weight and bias
         if self.fit_intercept:
             self.weight.data = theta[:-1].clone().detach()
@@ -141,11 +163,17 @@ class RidgeRegressor(nn.Module):
             self.weight.data = theta.clone().detach()
             self.bias.data = torch.tensor(0.0, device=device)
         
+        # Log training MAE
+        with torch.no_grad():
+            y_pred = torch.matmul(XWithIntercept, theta)
+            mae = torch.mean(torch.abs(y_pred - y))
+            logger.info(f"Training MAE after fitting: {mae:.4f}")
+
         self.is_fitted = True
-        
+    
     def forward(self, x):
-        logger.debug("RidgeRegressor forward pass with input shape: %s", x.shape)
-        
+        logger.debug(f"RidgeRegressor forward pass with input shape: {x.shape}")
+
         if not self.is_fitted:
             raise RuntimeError("Ridge model must be fitted before forward pass. Call .fit() first.")
         
@@ -154,8 +182,8 @@ class RidgeRegressor(nn.Module):
             x = x.view(x.shape[0], -1)
         
         x = x.to(self.weight.device).float()
-        predictions = torch.mv(x, self.weight)
-        
+        predictions = torch.matmul(x, self.weight)
+
         if self.fit_intercept:
             predictions = predictions + self.bias
         
@@ -184,59 +212,65 @@ class ElasticNetClassifier(nn.Module):
         
     def soft_threshold(self, x, threshold):
         return torch.sign(x) * torch.clamp(torch.abs(x) - threshold, min=0.0)
-        
+    
     def fit_single_class(self, X, y_binary, device):
+        # Input shapes: X (numSamples, numFeatures), y_binary (numSamples,)
         numSamples, numFeatures = X.shape
-        X_standardised = X.float()
+        X = X.float().to(device)  # Ensure float type and move to device
+        y_binary = y_binary.float().to(device)
         
+        # Handle intercept
         if self.fit_intercept:
-            y_mean = y_binary.float().mean()
-            y_centred = y_binary.float() - y_mean
+            y_mean = y_binary.mean()
+            y_centered = y_binary - y_mean
         else:
-            y_centred = y_binary.float()
-            y_mean = torch.tensor(0.0, device=device)
+            y_centered = y_binary
+            y_mean = torch.tensor(0.0, device=device, dtype=torch.float)
         
+        # Initialize coefficients
         beta = torch.zeros(numFeatures, device=device, dtype=X.dtype)
         l1_reg = self.alpha * self.l1_ratio
         l2_reg = self.alpha * (1 - self.l1_ratio)
         
-        # Just check and warn if zero variance exists
-        X_var = torch.var(X_standardised, dim=0, unbiased=False)
-        if (X_var < self.eps).any():
-            logger.warning("Zero variance features detected")
+        # Precompute X^T X diagonal (vectorized)
+        XtX_diag = torch.sum(X**2, dim=0) / numSamples
         
-        # Coordinate descent
+        # Coordinate descent loop
         for iteration in range(self.max_iter):
             beta_old = beta.clone()
             
-            # Vectorized computation of residuals for all features
-            residuals = y_centred - X_standardised @ beta
+            # Vectorized residual computation for all features
+            X_beta = X @ beta  # Matrix-vector product
+            for j in range(numFeatures):
+                # Residual excluding feature j
+                residual = y_centered - X_beta + X[:, j] * beta[j]
+                
+                # Compute rho_j (correlation with residual)
+                rho_j = torch.dot(X[:, j], residual) / numSamples
+                
+                # Soft thresholding (element-wise operation)
+                numerator = self.soft_threshold(rho_j, l1_reg / numSamples)
+                denominator = XtX_diag[j] + l2_reg / numSamples
+                
+                beta[j] = numerator / (denominator + self.eps)
             
-            # Vectorized computation of rho_j for all features
-            rho = torch.matmul(X_standardised.t(), residuals) / numSamples
-            
-            denominator = 1.0 + (l2_reg / numSamples)
-            beta_new = self.soft_threshold(rho, l1_reg / numSamples) / denominator
-            
-            # Clip beta to prevent explosion
-            beta = torch.clamp(beta_new, min=-1e6, max=1e6)
-            
-            # Check for convergence
+            # Check convergence
             if torch.norm(beta - beta_old) < self.tol:
-                logger.info("Converged after %d iterations", iteration + 1)
+                logger.debug(f"Converged after {iteration + 1} iterations")
                 break
                 
+            # Prevent explosion
             if torch.abs(beta).max() > 1e5:
-                logger.warning(f"Beta coefficients too large, using zero weights")
-                weight = torch.zeros_like(beta)
-                bias = torch.tensor(0.0, device=device)
-                return weight, bias
+                logger.warning("Beta coefficients too large, resetting")
+                beta = torch.zeros_like(beta)
+                break
         
+        # Assign weights and compute bias
         weight = beta
         if self.fit_intercept:
-            bias = y_mean
+            bias = y_mean - torch.dot(weight, torch.mean(X, dim=0))
         else:
-            bias = torch.tensor(0.0, device=device)
+            bias = torch.tensor(0.0, device=device, dtype=torch.float)
             
         return weight, bias
     
@@ -279,7 +313,7 @@ class ElasticNetClassifier(nn.Module):
         
         scores = []
         for class_idx in range(self.num_classes):
-            score = torch.mv(x, self.weights[class_idx])
+            score = torch.matmul(x, self.weights[class_idx])
             if self.fit_intercept:
                 score = score + self.biases[class_idx]
             scores.append(score.unsqueeze(1))
@@ -390,8 +424,8 @@ class EnsembleModule(L.LightningModule):
         # Meta-learning setup
         self.use_meta_learning = cfg.model.use_meta_learning
         if self.use_meta_learning:
-            meta_price_dim = 3  # cnn_price + ridge_price + dir_entropy
-            meta_dir_dim = 2 * self.num_classes + 2  # cnn_price + ridge_price + cnn_dir_probs + en_probs
+            meta_price_dim = 5  # cnn_price + ridge_price + dir_entropy
+            meta_dir_dim = 2 * self.num_classes + 6  # cnn_price + ridge_price + cnn_dir_probs + en_probs
             self.meta_price = MetaPriceRegressor(in_dim=meta_price_dim)
             self.meta_dir = MetaDirectionClassifier(in_dim=meta_dir_dim, num_classes=self.num_classes)
         
@@ -432,56 +466,90 @@ class EnsembleModule(L.LightningModule):
     
     def orthogonal_loss(self, price_features, direction_features):
         """
-        Penalizes cosine similarity between feature vectors to encourage orthogonality.
+        Penalizes cosine similarity between feature vectors with a softer penalty.
         Args:
-            feat_price (torch.Tensor): Batch of feature vectors for price (shape: [batch_size, feature_dim]).
-            feat_direction (torch.Tensor): Batch of feature vectors for direction (shape: [batch_size, feature_dim]).
+            price_features (torch.Tensor): Batch of feature vectors for price (shape: [batch_size, feature_dim]).
+            direction_features (torch.Tensor): Batch of feature vectors for direction (shape: [batch_size, feature_dim]).
         Returns:
-            torch.Tensor: Mean squared cosine similarity loss (scalar).
+            torch.Tensor: Mean absolute cosine similarity loss (scalar).
         """
         price_features = F.normalize(price_features, dim=-1)
         direction_features = F.normalize(direction_features, dim=-1)
         cos = torch.sum(price_features * direction_features, dim=-1)
-        return torch.mean(cos ** 2)
+        cos = torch.clamp(cos, min=-0.99, max=0.99)  # Clamp to avoid extreme values
+        return torch.mean(torch.abs(cos))  # Use absolute value instead of squared term
     
     def build_meta_features(self, x, cnn_price, cnn_dir_logits):
         """
-        Returns:
-            z_price: (B, 3)  # cnn_price, ridge_price, dir_entropy
-            z_dir:   (B, 2 + 2 * num_classes)  # cnn_price, ridge_price, cnn_dir_probs, en_probs
+        Build robust meta-features with proper error handling and normalization.
         """
         B = cnn_price.shape[0]
         device = cnn_price.device
         
         cnn_dir_probs = F.softmax(cnn_dir_logits, dim=1)
         
+        # Get base model predictions with error handling
         if self.ridge_fitted and self.ridge.is_fitted:
-            ridge_price = self.ridge(x)
-            ridge_price = ridge_price.view(-1, 1)
+            try:
+                ridge_price = self.ridge(x)
+                if ridge_price.dim() > 1:
+                    ridge_price = ridge_price.squeeze(-1)
+            except Exception as e:
+                logger.warning(f"Ridge prediction failed in meta-features: {e}")
+                ridge_price = torch.zeros(B, device=device)
         else:
-            ridge_price = torch.zeros(B, 1, device=device)
+            ridge_price = torch.zeros(B, device=device)
             
         if self.elasticNet_fitted and self.elasticNet.is_fitted:
-            en_logits = self.elasticNet(x)
-            en_probs = F.softmax(en_logits, dim=1)
+            try:
+                en_logits = self.elasticNet(x)
+                en_probs = F.softmax(en_logits, dim=1)
+            except Exception as e:
+                logger.warning(f"ElasticNet prediction failed in meta-features: {e}")
+                en_probs = torch.zeros(B, self.num_classes, device=device)
         else:
             en_probs = torch.zeros(B, self.num_classes, device=device)
         
-        # Assemble meta inputs
-        dir_entropy = -torch.sum(cnn_dir_probs * torch.log(cnn_dir_probs + 1e-10), dim=1, keepdim=True)
-        prices = torch.stack([cnn_price.view(-1), ridge_price.view(-1)], dim=1)  # Shape: (B, 2)
-        price_sigma = torch.std(prices, dim=1, keepdim=True) + 1e-6
-        price_entropy = 0.5 * torch.log(2 * math.pi * math.e * price_sigma**2)  # Shape: (B, 1)
+        # Calculate diversity/uncertainty features
+        dir_entropy = -torch.sum(cnn_dir_probs * torch.log(cnn_dir_probs + 1e-10), dim=1)
         
-        z_price = torch.cat([
-            cnn_price.view(-1, 1),
+        # Price prediction diversity (more robust)
+        if ridge_price is not None and not torch.allclose(ridge_price, torch.zeros_like(ridge_price)):
+            price_diff = torch.abs(cnn_price.squeeze() - ridge_price)
+            price_mean = (cnn_price.squeeze() + ridge_price) / 2
+            price_disagreement = price_diff / (torch.abs(price_mean) + 1e-6)
+        else:
+            price_disagreement = torch.zeros(B, device=device)
+        
+        # Direction prediction diversity
+        if not torch.allclose(en_probs, torch.zeros_like(en_probs)):
+            # KL divergence between CNN and ElasticNet predictions
+            dir_kl_div = torch.sum(cnn_dir_probs * torch.log(
+                (cnn_dir_probs + 1e-10) / (en_probs + 1e-10)
+            ), dim=1)
+        else:
+            dir_kl_div = torch.zeros(B, device=device)
+        
+        # Confidence features
+        cnn_confidence = torch.max(cnn_dir_probs, dim=1)[0]
+        en_confidence = torch.max(en_probs, dim=1)[0] if not torch.allclose(en_probs, torch.zeros_like(en_probs)) else torch.zeros(B, device=device)
+        
+        # Build meta inputs
+        z_price = torch.stack([
+            cnn_price.squeeze(),
             ridge_price,
-            dir_entropy
+            dir_entropy,
+            price_disagreement,
+            cnn_confidence
         ], dim=1)
         
         z_dir = torch.cat([
-            price_entropy,
-            dir_entropy,
+            cnn_price.squeeze().unsqueeze(1),
+            ridge_price.unsqueeze(1),
+            dir_entropy.unsqueeze(1),
+            dir_kl_div.unsqueeze(1),
+            cnn_confidence.unsqueeze(1),
+            en_confidence.unsqueeze(1),
             cnn_dir_probs,
             en_probs
         ], dim=1)
