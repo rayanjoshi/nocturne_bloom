@@ -101,7 +101,7 @@ def optuna_search_space(trial):
         # Loss weights - critical for MAE vs accuracy balance
         "price_loss_weight_raw": trial.suggest_float("price_loss_weight_raw", 0.1, 0.9, step=0.01),
         "direction_loss_weight_raw": trial.suggest_float("direction_loss_weight_raw", 0.1, 0.9, step=0.01),
-        
+        "orthogonal_lambda": trial.suggest_float("orthogonal_lambda", 1e-6, 1e2, step=0.1),
         # Huber loss parameter - important for price prediction robustness
         "huber_delta": trial.suggest_float("huber_delta", 0.01, 5.0, step=0.01),
         
@@ -189,6 +189,7 @@ def get_ray_tune_search_space():
         "ridge_weight_raw": tune.uniform(0.1, 2.0),
         "direction_cnn_weight_raw": tune.uniform(0.1, 2.0),
         "elastic_weight_raw": tune.uniform(0.1, 2.0),
+        "orthongonal_lambda": tune.loguniform(1e-6,1e2),
         # Loss weights - critical for MAE vs accuracy balance
         "price_loss_weight_raw": tune.uniform(0.1, 0.9),
         "direction_loss_weight_raw": tune.uniform(0.1, 0.9),
@@ -291,6 +292,7 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     loss_total = trial_params["price_loss_weight_raw"] + trial_params["direction_loss_weight_raw"]
     cfg_dict['model']['price_loss_weight'] = trial_params["price_loss_weight_raw"] / loss_total
     cfg_dict['model']['direction_loss_weight'] = trial_params["direction_loss_weight_raw"] / loss_total
+    cfg_dict['model']['orthogonal_lambda'] = trial_params.get("orthogonal_lambda", 0.1)
     
     # Update model parameters
     cfg_dict['model']['huber_delta'] = trial_params["huber_delta"]
