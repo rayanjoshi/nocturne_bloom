@@ -310,6 +310,62 @@ class MetaDirectionClassifier(nn.Module):
     def forward(self, z):
         return self.linear(z)
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1.0, gamma=2.0, reduction='mean'):
+        """
+        Focal Loss for multi-class classification.
+        
+        Args:
+            alpha (float or list): Weighting factor for class imbalance. If float, applies to all classes.
+            If list, should match number of classes.
+            gamma (float): Focusing parameter to down-weight easy examples.
+            reduction (str): Reduction method ('mean', 'sum', or 'none').
+        """
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        """
+        Compute Focal Loss.
+        
+        Args:
+            inputs (torch.Tensor): Raw logits from the model (batch_size, num_classes).
+            targets (torch.Tensor): Ground truth labels (batch_size,).
+        
+        Returns:
+            torch.Tensor: Computed focal loss.
+        """
+        # Compute softmax probabilities
+        probs = F.softmax(inputs, dim=1)
+        
+        # Create one-hot encoding of targets
+        one_hot = F.one_hot(targets, num_classes=inputs.size(1)).float()
+        
+        # Get probabilities for the true class
+        pt = (probs * one_hot).sum(dim=1)
+        
+        # Compute focal loss components
+        log_pt = torch.log(pt + 1e-10)  # Add small epsilon to avoid log(0)
+        focal_term = (1 - pt) ** self.gamma
+        
+        # Apply alpha weighting
+        if isinstance(self.alpha, (list, tuple)):
+            alpha_t = torch.tensor(self.alpha, device=inputs.device)[targets]
+        else:
+            alpha_t = self.alpha
+        
+        # Compute loss
+        loss = -alpha_t * focal_term * log_pt
+        
+        # Apply reduction
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        else:
+            return loss
 class EnsembleModule(L.LightningModule):
     """
     Multi-headed CNN-Ridge-ElasticNet Ensemble Lightning Module
@@ -349,8 +405,8 @@ class EnsembleModule(L.LightningModule):
         
         # Loss functions
         self.price_criterion = nn.HuberLoss(delta=cfg.model.huber_delta)
-        self.direction_criterion = nn.CrossEntropyLoss()
-        
+        self.direction_criterion = FocalLoss(alpha=cfg.model.focal_alpha, gamma=cfg.model.focal_gamma)
+
         # Metrics
         self._setup_metrics()
         

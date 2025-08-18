@@ -6,6 +6,8 @@ model:
   price_loss_weight: 0.5374976510146406
   direction_loss_weight: 0.46250234898535936
   orthogonal_lambda: 0.1
+  focal_alpha: 0.25  # Alpha parameter for Focal Loss, can be adjusted based on class imbalance
+  focal_gamma: 2.0  # Gamma parameter for Focal Loss, can be adjusted based on class imbalance
   # Direction threshold is set during feature engineering.
 
   use_meta_learning: true  # Enable/disable meta-learning
