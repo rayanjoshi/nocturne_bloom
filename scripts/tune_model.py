@@ -199,8 +199,8 @@ def get_ray_tune_search_space():
         "huber_delta": tune.uniform(0.01, 5.0),
         
         # Focal loss parameters - important for class imbalance
-        "focal_gamma": tune.suggest_float("focal_gamma", 0.5, 5.0, step=0.1),
-        "focal_alpha": tune.suggest_float("focal_alpha", 0.0, 1.0, step=0.01),
+        "focal_gamma": tune.uniform(0.5, 5.0),
+        "focal_alpha": tune.uniform( 0.0, 1.0),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": tune.loguniform(1e-8, 1e-1),
