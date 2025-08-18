@@ -7,6 +7,7 @@ import lightning as L
 from omegaconf import DictConfig
 from pathlib import Path
 from scripts.logging_config import get_logger, setup_logging
+import math
 
 setup_logging(log_level="INFO", console_output=True, file_output=True)
 logger = get_logger("model_Ensemble")
@@ -390,7 +391,7 @@ class EnsembleModule(L.LightningModule):
         self.use_meta_learning = cfg.model.use_meta_learning
         if self.use_meta_learning:
             meta_price_dim = 3  # cnn_price + ridge_price + dir_entropy
-            meta_dir_dim = 2 + 2 * self.num_classes  # cnn_price + ridge_price + cnn_dir_probs + en_probs
+            meta_dir_dim = 2 * self.num_classes + 2  # cnn_price + ridge_price + cnn_dir_probs + en_probs
             self.meta_price = MetaPriceRegressor(in_dim=meta_price_dim)
             self.meta_dir = MetaDirectionClassifier(in_dim=meta_dir_dim, num_classes=self.num_classes)
         
@@ -468,6 +469,10 @@ class EnsembleModule(L.LightningModule):
         
         # Assemble meta inputs
         dir_entropy = -torch.sum(cnn_dir_probs * torch.log(cnn_dir_probs + 1e-10), dim=1, keepdim=True)
+        prices = torch.stack([cnn_price.view(-1), ridge_price.view(-1)], dim=1)  # Shape: (B, 2)
+        price_sigma = torch.std(prices, dim=1, keepdim=True) + 1e-6
+        price_entropy = 0.5 * torch.log(2 * math.pi * math.e * price_sigma**2)  # Shape: (B, 1)
+        
         z_price = torch.cat([
             cnn_price.view(-1, 1),
             ridge_price,
@@ -475,8 +480,8 @@ class EnsembleModule(L.LightningModule):
         ], dim=1)
         
         z_dir = torch.cat([
-            cnn_price.view(-1, 1),
-            ridge_price,
+            price_entropy,
+            dir_entropy,
             cnn_dir_probs,
             en_probs
         ], dim=1)
