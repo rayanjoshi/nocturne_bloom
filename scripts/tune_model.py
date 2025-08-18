@@ -104,7 +104,10 @@ def optuna_search_space(trial):
         "orthogonal_lambda": trial.suggest_float("orthogonal_lambda", 1e-6, 1e2, step=0.1),
         # Huber loss parameter - important for price prediction robustness
         "huber_delta": trial.suggest_float("huber_delta", 0.01, 5.0, step=0.01),
-        
+
+        # Focal loss parameters - important for class imbalance
+        "focal_gamma": trial.suggest_float("focal_gamma", 0.5, 5.0, step=0.1),
+        "focal_alpha": trial.suggest_float("focal_alpha", 0.0, 1.0, step=0.01),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": trial.suggest_float("weight_decay", 1e-8, 1e-1, log=True),
@@ -194,6 +197,10 @@ def get_ray_tune_search_space():
         
         # Huber loss parameter - important for price prediction robustness
         "huber_delta": tune.uniform(0.01, 5.0),
+        
+        # Focal loss parameters - important for class imbalance
+        "focal_gamma": tune.suggest_float("focal_gamma", 0.5, 5.0, step=0.1),
+        "focal_alpha": tune.suggest_float("focal_alpha", 0.0, 1.0, step=0.01),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": tune.loguniform(1e-8, 1e-1),
@@ -288,7 +295,9 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     cfg_dict['model']['price_loss_weight'] = trial_params["price_loss_weight_raw"] / loss_total
     cfg_dict['model']['direction_loss_weight'] = trial_params["direction_loss_weight_raw"] / loss_total
     cfg_dict['model']['orthogonal_lambda'] = trial_params.get("orthogonal_lambda", 0.1)
-    
+    cfg_dict['model']['focal_gamma'] = trial_params.get("focal_gamma", 2.0)
+    cfg_dict['model']['focal_alpha'] = trial_params.get("focal_alpha", 0.25)
+
     # Update model parameters
     cfg_dict['model']['huber_delta'] = trial_params["huber_delta"]
     # Meta-learning and optimizer params
@@ -433,7 +442,7 @@ def main(cfg: DictConfig):
     # Configuration for optimization
     metric = "multi_objective_score"
     mode = "max"
-    num_samples = 200
+    num_samples = 100
     max_concurrent = 5
     
     logger.info("Optimizing for combined MAE and Direction Accuracy")
