@@ -14,7 +14,7 @@ logger = get_logger("model_Ensemble")
 
 class MultiHeadCNN(nn.Module):
     def __init__(self, cfg: DictConfig):
-        logger.info("Initializing CNN model with config: %s", cfg.cnn)
+        logger.info(f"Initializing CNN model with config: {cfg.cnn}")
         super().__init__()
         inputChannels = cfg.cnn.inputChannels
         cnnChannels = [cfg.cnn.cnnChannels[0], cfg.cnn.cnnChannels[1], cfg.cnn.cnnChannels[2]]
@@ -22,64 +22,126 @@ class MultiHeadCNN(nn.Module):
         self.cnn = nn.Sequential(
             nn.Conv1d(inputChannels, cnnChannels[0], kernel_size=cfg.cnn.kernelSize[0], padding=cfg.cnn.padding[0]),
             nn.BatchNorm1d(cnnChannels[0]),
-            nn.ReLU(),
+            nn.ReLU(inplace = True),
             nn.MaxPool1d(kernel_size=cfg.cnn.poolSize[0], stride=cfg.cnn.stride, padding=cfg.cnn.poolPadding[0]),
-            nn.Dropout(cfg.cnn.dropout[0]),
+            nn.Dropout(cfg.cnn.dropout[0] * 0.5),
             
             nn.Conv1d(cnnChannels[0], cnnChannels[1], kernel_size=cfg.cnn.kernelSize[1], padding=cfg.cnn.padding[1]),
             nn.BatchNorm1d(cnnChannels[1]),
-            nn.ReLU(),
+            nn.ReLU(inplace = True),
             nn.MaxPool1d(kernel_size=cfg.cnn.poolSize[1], stride=cfg.cnn.stride, padding=cfg.cnn.poolPadding[1]),
             nn.Dropout(cfg.cnn.dropout[0]),
             
             nn.Conv1d(cnnChannels[1], cnnChannels[2], kernel_size=cfg.cnn.kernelSize[2], padding=cfg.cnn.padding[2]),
             nn.BatchNorm1d(cnnChannels[2]),
-            nn.ReLU(),
+            nn.ReLU(inplace = True),
+            
+            nn.Conv1d(cnnChannels[2], cnnChannels[2], kernel_size=cfg.cnn.kernelSize[2], padding=cfg.cnn.padding[2]),
+            nn.BatchNorm1d(cnnChannels[2]),
+            nn.ReLU(inplace = True),
+            
             nn.AdaptiveAvgPool1d(1),
             nn.Dropout(cfg.cnn.dropout[0])
         )
         
         self.price_features = nn.Sequential(
             nn.Linear(cnnChannels[2], cnnChannels[1]),
-            nn.ReLU(),
+            nn.BatchNorm1d(cnnChannels[1]),
+            nn.ReLU(inplace = True),
             nn.Dropout(cfg.cnn.dropout[1]),
         )
         
         self.direction_features = nn.Sequential(
             nn.Linear(cnnChannels[2], cnnChannels[1]),
             nn.ReLU(),
+            nn.Dropout(cfg.cnn.dropout[1] * 0.5),
+            
+            # previous layer outputs size cnnChannels[1], so this layer must take that as input
+            nn.Linear(cnnChannels[1], cnnChannels[1] * 2),
+            nn.BatchNorm1d(cnnChannels[1] * 2),
+            nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[1]),
+            
+            nn.Linear(cnnChannels[1] * 2, cnnChannels[1]),
+            nn.BatchNorm1d(cnnChannels[1]),
+            nn.ReLU(inplace=True),
         )
         
         self.pricehead = nn.Sequential(
             nn.Linear(cnnChannels[1], cnnChannels[2]),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
             nn.Linear(cnnChannels[2], 1)
         )
         
         num_classes = cfg.cnn.num_classes
         self.directionhead = nn.Sequential(
-            nn.Linear(cnnChannels[1], cnnChannels[2]),
-            nn.ReLU(),
+            nn.Linear(cnnChannels[1], cnnChannels[2] * 2),
+            nn.BatchNorm1d(cnnChannels[2] * 2),
+            nn.ReLU(inplace=True),
+            nn.Dropout(cfg.cnn.dropout[0] * 0.5),
+            
+            nn.Linear(cnnChannels[2] * 2, cnnChannels[2] * 2),
+            nn.BatchNorm1d(cnnChannels[2] * 2),
+            nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
-            nn.Linear(cnnChannels[2], cnnChannels[2] * 2),
-            nn.ReLU(),
+            
+            nn.Linear(cnnChannels[2] * 2, cnnChannels[2]),
+            nn.BatchNorm1d(cnnChannels[2]),
+            nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
-            nn.Linear(cnnChannels[2] * 2, num_classes)
+            
+            nn.Linear(cnnChannels[2], num_classes)
         )
         
+        self._initialize_weights()
+        
+    def _initialize_weights(self):
+        """Proper weight initialization for better convergence"""
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                # Check if the module is part of self.directionhead
+                if any(m is layer for layer in self.directionhead.modules() if isinstance(layer, nn.Linear)):
+                    nn.init.xavier_uniform_(m.weight)
+                else:
+                    nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+    
     def forward(self, x):
-        logger.debug("MultiHeadCNN forward pass with input shape: %s", x.shape)
+        logger.debug(f"MultiHeadCNN forward pass with input shape: {x.shape}")
         x = x.transpose(1, 2)
         x = self.cnn(x)
         x = x.squeeze(-1)
         
         price_features = self.price_features(x)
-        direction_features = self.direction_features(x)
+        direction_features_raw = self.direction_features(x)
+        
+        # Add pooled CNN activations to learned direction features.
+        # Project pooled activations to match direction_features_raw dim when necessary.
+        pooled = F.adaptive_avg_pool1d(x.unsqueeze(-1), 1).squeeze(-1)
+        if pooled.size(1) != direction_features_raw.size(1):
+            pooled = F.linear(pooled,
+                                torch.eye(direction_features_raw.size(1), pooled.size(1),
+                                        device=pooled.device, dtype=pooled.dtype))
+        
+        direction_features = direction_features_raw + pooled
+        
+        # Ensure direction_features and price_features have same dim; project if needed
+        if direction_features.size(1) != price_features.size(1):
+            direction_features = F.linear(direction_features,
+                                            torch.eye(price_features.size(1), direction_features.size(1),
+                                                    device=direction_features.device, dtype=direction_features.dtype))
         
         price_pred = self.pricehead(price_features).squeeze(-1)
-        direction_pred = self.directionhead(direction_features)
+        direction_pred = self.directionhead(direction_features_raw)
         
         return price_pred, direction_pred, price_features, direction_features
 
@@ -557,8 +619,8 @@ class EnsembleModule(L.LightningModule):
         return z_price, z_dir
     
     def forward(self, x):
-        logger.debug("EnsembleModule forward pass with input shape: %s", x.shape)
-        
+        logger.debug(f"EnsembleModule forward pass with input shape: {x.shape}")
+
         # Always get CNN predictions first
         cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
         
