@@ -408,61 +408,116 @@ class MetaDirectionClassifier(nn.Module):
         return self.linear(z)
 
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=1.0, gamma=2.0, reduction='mean'):
-        """
-        Focal Loss for multi-class classification.
-        
-        Args:
-            alpha (float or list): Weighting factor for class imbalance. If float, applies to all classes.
-            If list, should match number of classes.
-            gamma (float): Focusing parameter to down-weight easy examples.
-            reduction (str): Reduction method ('mean', 'sum', or 'none').
-        """
+    """
+    Focal loss with proper class balancing and adaptive parameters.
+    Optimized for production with device-agnostic computations and robust input validation.
+    
+    Args:
+        num_classes (int): Number of classes in the classification task.
+        class_counts (torch.Tensor): Tensor of class counts for computing weights.
+        gamma (float): Focusing parameter for focal loss (default: 1.5).
+        beta (float): Beta parameter for effective number of samples (default: 0.9999).
+        reduction (str): Reduction method ('mean', 'sum', or 'none').
+        eps (float): Small epsilon for numerical stability (default: 1e-8).
+    """
+    def __init__(self, num_classes: int, class_counts: torch.Tensor = None, 
+                    gamma: float = 1.5, beta: float = 0.9999, 
+                    reduction: str = 'mean', eps: float = 1e-8):
         super().__init__()
-        self.alpha = alpha
+        # Validate inputs
+        if not isinstance(num_classes, int) or num_classes < 1:
+            raise ValueError(f"num_classes must be a positive integer, got {num_classes}")
+        # Allow None class_counts (fallback to uniform)
+        if class_counts is None:
+            class_counts = torch.ones(num_classes, dtype=torch.float32)
+        elif not isinstance(class_counts, torch.Tensor):
+            class_counts = torch.tensor(class_counts, dtype=torch.float32)
+
+        if len(class_counts) != num_classes:
+            raise ValueError(f"class_counts length ({len(class_counts)}) must match num_classes ({num_classes})")
+        # If counts are all zeros or negative values sneaked in, fallback to uniform
+        if (class_counts <= 0).all():
+            class_counts = torch.ones(num_classes, dtype=torch.float32)
+        if (class_counts < 0).any():
+            raise ValueError("class_counts must be non-negative")
+        if reduction not in ['mean', 'sum', 'none']:
+            raise ValueError(f"Invalid reduction: {reduction}. Must be 'mean', 'sum', or 'none'.")
+
+        # Calculate effective weights using effective number of samples
+        effective_num = 1.0 - torch.pow(beta, class_counts)
+        # Avoid divide-by-zero by clamping effective_num
+        effective_num = torch.clamp(effective_num, min=eps)
+        weights = (1.0 - beta) / (effective_num)  # Avoid division by zero
+        weights = weights / (weights.sum() + eps) * num_classes  # Normalize weights
+        
+        # Log weights for debugging
+        logger.info(f"Calculated class weights: {weights.tolist()}")
+        
+        # Register weights as buffer to ensure device consistency
+        self.register_buffer('alpha', weights)
         self.gamma = gamma
         self.reduction = reduction
-
-    def forward(self, inputs, targets):
+        self.num_classes = num_classes
+        self.eps = eps
+    
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
-        Compute Focal Loss.
+        Compute focal loss with balanced weights.
         
         Args:
-            inputs (torch.Tensor): Raw logits from the model (batch_size, num_classes).
-            targets (torch.Tensor): Ground truth labels (batch_size,).
+            inputs (torch.Tensor): Raw logits of shape (batch_size, num_classes).
+            targets (torch.Tensor): Ground truth labels of shape (batch_size,).
         
         Returns:
-            torch.Tensor: Computed focal loss.
+            torch.Tensor: Computed focal loss based on reduction type.
         """
-        # Compute softmax probabilities
-        probs = F.softmax(inputs, dim=1)
+        # Validate inputs
+        if inputs.dim() != 2 or inputs.size(1) != self.num_classes:
+            raise ValueError(f"Expected inputs of shape (batch_size, {self.num_classes}), got {inputs.shape}")
+        if targets.dim() != 1 or targets.size(0) != inputs.size(0):
+            raise ValueError(f"Expected targets of shape (batch_size,), got {targets.shape}")
+        if (targets < 0).any() or (targets >= self.num_classes).any():
+            raise ValueError(f"Targets must be in range [0, {self.num_classes-1}]")
         
-        # Create one-hot encoding of targets
-        one_hot = F.one_hot(targets, num_classes=inputs.size(1)).float()
+        # Compute cross-entropy loss (logits -> log_softmax -> negative log likelihood)
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
         
-        # Get probabilities for the true class
-        pt = (probs * one_hot).sum(dim=1)
+        # Compute p_t (probability of true class)
+        pt = torch.exp(-ce_loss).clamp(min=self.eps, max=1.0)  # Clamp for numerical stability
         
-        # Compute focal loss components
-        log_pt = torch.log(pt + 1e-10)  # Add small epsilon to avoid log(0)
-        focal_term = (1 - pt) ** self.gamma
+        # Get alpha for each sample
+        alpha_t = self.alpha[targets]  # Shape: (batch_size,)
         
-        # Apply alpha weighting
-        if isinstance(self.alpha, (list, tuple)):
-            alpha_t = torch.tensor(self.alpha, device=inputs.device)[targets]
-        else:
-            alpha_t = self.alpha
-        
-        # Compute loss
-        loss = -alpha_t * focal_term * log_pt
+        # Compute focal loss: -alpha_t * (1 - pt)^gamma * log(pt)
+        focal_loss = alpha_t * (1 - pt) ** self.gamma * ce_loss
         
         # Apply reduction
         if self.reduction == 'mean':
-            return loss.mean()
+            return focal_loss.mean()
         elif self.reduction == 'sum':
-            return loss.sum()
-        else:
-            return loss
+            return focal_loss.sum()
+        return focal_loss
+    
+class OrthogonalLoss(nn.Module):
+    """
+    Enhanced orthogonal loss to reduce feature correlation
+    """
+    def __init__(self, lambda_ortho=1.0):
+        super().__init__()
+        self.lambda_ortho = lambda_ortho
+    
+    def forward(self, price_features, direction_features):
+        # Normalize features
+        price_norm = F.normalize(price_features, p=2, dim=1, eps=1e-8)
+        direction_norm = F.normalize(direction_features, p=2, dim=1, eps=1e-8)
+        
+        # Calculate cosine similarity
+        # per-sample cosine similarity in range [-1, 1]
+        cosine_sim = torch.sum(price_norm * direction_norm, dim=1)
+        penalty = torch.mean(torch.abs(cosine_sim))  # scalar penalty
+        return self.lambda_ortho * penalty, cosine_sim
+    
+
 class EnsembleModule(L.LightningModule):
     """
     Multi-headed CNN-Ridge-ElasticNet Ensemble Lightning Module
@@ -502,7 +557,16 @@ class EnsembleModule(L.LightningModule):
         
         # Loss functions
         self.price_criterion = nn.HuberLoss(delta=cfg.model.huber_delta)
-        self.direction_criterion = FocalLoss(alpha=cfg.model.focal_alpha, gamma=cfg.model.focal_gamma)
+        self.direction_criterion = FocalLoss(num_classes=self.num_classes,
+                                                class_counts=None,
+                                                gamma=cfg.model.focal_gamma,
+                                                beta=cfg.model.focal_beta,
+                                                reduction='mean',
+                                                eps=1e-8
+                                                )
+        self.orthogonal_loss = OrthogonalLoss(lambda_ortho=cfg.model.orthogonal_lambda)
+        
+        self.class_counts = None
 
         # Metrics
         self._setup_metrics()
@@ -525,21 +589,6 @@ class EnsembleModule(L.LightningModule):
         self.direction_f1_train = F1Score(task="multiclass", num_classes=self.num_classes, average='weighted')
         self.direction_acc_val = Accuracy(task="multiclass", num_classes=self.num_classes)
         self.direction_f1_val = F1Score(task="multiclass", num_classes=self.num_classes, average='weighted')
-    
-    def orthogonal_loss(self, price_features, direction_features):
-        """
-        Penalizes cosine similarity between feature vectors with a softer penalty.
-        Args:
-            price_features (torch.Tensor): Batch of feature vectors for price (shape: [batch_size, feature_dim]).
-            direction_features (torch.Tensor): Batch of feature vectors for direction (shape: [batch_size, feature_dim]).
-        Returns:
-            torch.Tensor: Mean absolute cosine similarity loss (scalar).
-        """
-        price_features = F.normalize(price_features, dim=-1)
-        direction_features = F.normalize(direction_features, dim=-1)
-        cos = torch.sum(price_features * direction_features, dim=-1)
-        cos = torch.clamp(cos, min=-0.99, max=0.99)  # Clamp to avoid extreme values
-        return torch.mean(torch.abs(cos))  # Use absolute value instead of squared term
     
     def build_meta_features(self, x, cnn_price, cnn_dir_logits):
         """
@@ -677,7 +726,35 @@ class EnsembleModule(L.LightningModule):
         return final_price, final_direction, price_features, direction_features
     
     def on_train_start(self):
-        logger.info("on_train_start: Fitting Ridge and ElasticNet on training data...")
+        logger.info("Setting up training with class balancing...")
+        
+        # Compute class distribution
+        train_dataloader = self.trainer.datamodule.train_dataloader()
+        device = next(self.parameters()).device
+        all_labels = []
+        
+        for batch in train_dataloader:
+            _, _, direction_y = batch
+            all_labels.append(direction_y.to(device))
+        
+        all_labels = torch.cat(all_labels, dim=0)
+        unique, counts = torch.unique(all_labels, return_counts=True)
+        self.class_counts = counts.to(device)
+        
+        logger.info(f"Class distribution: {dict(zip(unique.tolist(), counts.tolist()))}")
+        logger.info(f"Class imbalance ratio: {float(counts.max() / counts.min()):.2f}")
+        
+        # Update direction_criterion with class counts
+        self.direction_criterion = FocalLoss(
+            num_classes=self.num_classes,
+            class_counts=self.class_counts,
+            gamma=self.cfg.model.focal_gamma,
+            beta=self.cfg.model.get('focal_beta', 0.9999),
+            reduction='mean',
+            eps=1e-8
+        ).to(device)
+        
+        logger.info("Fitting Ridge and ElasticNet on training data...")
         
         if not (self.ridge_fitted and self.elasticNet_fitted):
             train_dataloader = self.trainer.datamodule.train_dataloader()
@@ -734,14 +811,15 @@ class EnsembleModule(L.LightningModule):
             base_direction_loss = self.direction_criterion(cnn_direction_logits, direction_y)
             base_losses = (self.price_loss_weight * base_price_loss + 
                           self.direction_loss_weight * base_direction_loss)
-        
-        # Orthogonal penalty
-        orthogonal_penalty = self.orthogonal_loss(price_features, direction_features)
-        
+
+        # Orthogonal penalty (returns penalty and per-sample cosine similarities)
+        orthogonal_penalty, cosine_sim = self.orthogonal_loss(price_features, direction_features)
+
         # Total loss
         total_loss = (self.price_loss_weight * price_loss + 
-                     self.direction_loss_weight * direction_loss + base_losses +
-                     orthogonal_penalty * self.cfg.model.orthogonal_lambda)
+                        self.direction_loss_weight * direction_loss + 
+                        base_losses + orthogonal_penalty
+                    )
         
         # Update metrics
         self.mae_train.update(price_pred, price_y)
@@ -756,9 +834,10 @@ class EnsembleModule(L.LightningModule):
         self.log('train_loss', total_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log('train_price_loss', price_loss, on_step=True, on_epoch=True)
         self.log('train_direction_loss', direction_loss, on_step=True, on_epoch=True)
+        self.log('train_cosine_sim', torch.mean(cosine_sim), on_step=True, on_epoch=True)
         if self.include_base_losses:
             self.log('train_base_losses', base_losses, on_step=True, on_epoch=True)
-        
+
         return total_loss
     
     def validation_step(self, batch, batch_idx):
@@ -789,13 +868,13 @@ class EnsembleModule(L.LightningModule):
                           self.direction_loss_weight * base_direction_loss)
         
         # Orthogonal penalty
-        orthogonal_penalty = self.orthogonal_loss(price_features, direction_features)
+        orthogonal_penalty, cosine_sim = self.orthogonal_loss(price_features, direction_features)
         
         # Total loss
         total_loss = (self.price_loss_weight * price_loss + 
-                     self.direction_loss_weight * direction_loss + 
-                        base_losses +
-                     orthogonal_penalty * self.cfg.model.orthogonal_lambda)
+                        self.direction_loss_weight * direction_loss + 
+                        base_losses + orthogonal_penalty
+                    )
         
         # Update metrics
         self.mae_val.update(price_pred, price_y)
@@ -810,6 +889,7 @@ class EnsembleModule(L.LightningModule):
         self.log('val_loss', total_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('val_price_loss', price_loss, on_step=False, on_epoch=True)
         self.log('val_direction_loss', direction_loss, on_step=False, on_epoch=True)
+        self.log('val_cosine_sim', torch.mean(cosine_sim), on_step=False, on_epoch=True)
         if self.include_base_losses:
             self.log('val_base_losses', base_losses, on_step=False, on_epoch=True)
         
