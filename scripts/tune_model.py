@@ -104,10 +104,11 @@ def optuna_search_space(trial):
         "orthogonal_lambda": trial.suggest_float("orthogonal_lambda", 1e-6, 1e2, step=0.1),
         # Huber loss parameter - important for price prediction robustness
         "huber_delta": trial.suggest_float("huber_delta", 0.01, 5.0, step=0.01),
-
+        
         # Focal loss parameters - important for class imbalance
         "focal_gamma": trial.suggest_float("focal_gamma", 0.5, 5.0, step=0.1),
         "focal_alpha": trial.suggest_float("focal_alpha", 0.0, 1.0, step=0.01),
+        "focal_beta": trial.suggest_float("focal_beta", 0.0, 1.0, step=0.01),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": trial.suggest_float("weight_decay", 1e-8, 1e-1, log=True),
@@ -201,6 +202,7 @@ def get_ray_tune_search_space():
         # Focal loss parameters - important for class imbalance
         "focal_gamma": tune.uniform(0.5, 5.0),
         "focal_alpha": tune.uniform( 0.0, 1.0),
+        "focal_beta": tune.uniform(0.0, 1.0),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": tune.loguniform(1e-8, 1e-1),
@@ -297,6 +299,7 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     cfg_dict['model']['orthogonal_lambda'] = trial_params.get("orthogonal_lambda", 0.1)
     cfg_dict['model']['focal_gamma'] = trial_params.get("focal_gamma", 2.0)
     cfg_dict['model']['focal_alpha'] = trial_params.get("focal_alpha", 0.25)
+    cfg_dict['model']['focal_beta'] = trial_params.get("focal_beta", 0.999)
 
     # Update model parameters
     cfg_dict['model']['huber_delta'] = trial_params["huber_delta"]
@@ -388,7 +391,7 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
                 val_loss = val_results[0].get("val_loss", float('inf'))
                 
                 # Calculate multi-objective score
-                metric_calculator = MultiObjectiveMetric(mae_weight=0.3, acc_weight=0.7, mae_scale=1.0)
+                metric_calculator = MultiObjectiveMetric(mae_weight=0.2, acc_weight=0.8, mae_scale=1.0)
                 multi_objective_score = metric_calculator(val_mae, val_direction_acc)
                 
                 # Report all metrics
