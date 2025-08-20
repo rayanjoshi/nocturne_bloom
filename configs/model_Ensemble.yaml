@@ -8,7 +8,7 @@ model:
   orthogonal_lambda: 0.17775825546595142
   focal_alpha: 0.6078464280406355 # Alpha parameter for Focal Loss, can be adjusted based on class imbalance
   focal_gamma: 4.519494240423438  # Gamma parameter for Focal Loss, can be adjusted based on class imbalance
-  focal_beta: 0.32060861991037426  # Beta parameter for Focal Loss, can be adjusted based on class imbalance
+  focal_beta: 0.999  # Beta parameter for Focal Loss, can be adjusted based on class imbalance
   # Direction threshold is set during feature engineering.
 
   use_meta_learning: true  # Enable/disable meta-learning
