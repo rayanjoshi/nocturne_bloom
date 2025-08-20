@@ -28,7 +28,7 @@ model:
   meta_direction_path: models/meta_direction_model.pth
 
 cnn:
-  inputChannels: 96  # Number of features (RSI, MACD, etc.)
+  inputChannels: 119  # Number of features (RSI, MACD, etc.)
   cnnChannels: [16, 48, 224]  # Reduced capacity to prevent overfitting
   kernelSize: [1, 4, 5]
   poolSize: [4, 1, 4]  # Pooling after each CNN layer

@@ -20,27 +20,76 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     total_values = dataFrame.size
     if nan_count > 0:
         nan_pct = (nan_count / total_values) * 100
-        logger.warning("Found %d NaN values in initial DataFrame (%.2f%% of all values)", nan_count, nan_pct)
+        logger.warning(f"Found {nan_count} NaN values in initial DataFrame ({nan_pct:.2f}% of all values)")
     dataFrame.dropna(inplace=True)
-    logger.debug("Rows dropped after NaN removal: %d", dataFrame.shape[0])
+    logger.debug(f"Rows dropped after NaN removal: {dataFrame.shape[0]}")
     
+    # -------- Candle Indicators --------- #
+    dataFrame['Body'] = dataFrame['Close'] - dataFrame['Open']
+    dataFrame['upperWick'] = dataFrame['High'] - dataFrame[['Close', 'Open']].max(axis=1)
+    dataFrame['lowerWick'] = dataFrame[['Close', 'Open']].min(axis=1) - dataFrame['Low']
+    logger.debug(f"Created candle features: Body mean {dataFrame['Body'].mean():.2f}, upperWick mean {dataFrame['upperWick'].mean():.2f}, lowerWick mean {dataFrame['lowerWick'].mean():.2f}")
+    dataFrame['Doji'] = (abs(dataFrame['Close'] - dataFrame['Open']) / dataFrame['Close'] < 0.001).astype(int)
+    logger.debug(f"Created 'Doji' feature: {dataFrame['Doji'].sum()} Doji candles detected")
+    
+    dataFrame['Bullish_Engulfing'] = (
+        (dataFrame['Close'].shift(1) < dataFrame['Open'].shift(1)) &  # Previous bearish candle
+        (dataFrame['Close'] > dataFrame['Open']) &  # Current bullish candle
+        (dataFrame['Close'] > dataFrame['Open'].shift(1)) &  # Engulfs previous open
+        (dataFrame['Open'] < dataFrame['Close'].shift(1))  # Engulfs previous close
+    ).astype(int)
+    logger.debug(f"Created 'Bullish_Engulfing': {dataFrame['Bullish_Engulfing'].sum()} patterns detected")
+    
+    dataFrame['Bearish_Engulfing'] = (
+        (dataFrame['Close'].shift(1) > dataFrame['Open'].shift(1)) &  # Previous bullish candle
+        (dataFrame['Close'] < dataFrame['Open']) &  # Current bearish candle
+        (dataFrame['Close'] < dataFrame['Open'].shift(1)) &  # Engulfs previous open
+        (dataFrame['Open'] > dataFrame['Close'].shift(1))  # Engulfs previous close
+    ).astype(int)
+    logger.debug(f"Created 'Bearish_Engulfing': {dataFrame['Bearish_Engulfing'].sum()} patterns detected")
+    
+    dataFrame['Hammer'] = (
+        (dataFrame['Body'].abs() < 0.3 * (dataFrame['High'] - dataFrame['Low'])) &  # Small body
+        (dataFrame['lowerWick'] > 2 * dataFrame['upperWick']) &  # Long lower wick
+        (dataFrame['lowerWick'] > 0.5 * dataFrame['Body'].abs())  # Lower wick dominates
+    ).astype(int)
+    logger.debug(f"Created 'Hammer': {dataFrame['Hammer'].sum()} patterns detected")
+    
+    dataFrame['Shooting_Star'] = (
+        (dataFrame['Body'].abs() < 0.3 * (dataFrame['High'] - dataFrame['Low'])) &  # Small body
+        (dataFrame['upperWick'] > 2 * dataFrame['lowerWick']) &  # Long upper wick
+        (dataFrame['upperWick'] > 0.5 * dataFrame['Body'].abs())  # Upper wick dominates
+    ).astype(int)
+    logger.debug(f"Created 'Shooting_Star': {dataFrame['Shooting_Star'].sum()} patterns detected")
+    
+    dataFrame['Bullish_Trend'] = (dataFrame['Close'] > dataFrame['Open']).rolling(5).mean()
+    logger.debug(f"Created 'Bullish_Trend' with mean: {dataFrame['Bullish_Trend'].mean():.2f}")
+    dataFrame['Bearish_Trend'] = (dataFrame['Close'] < dataFrame['Open']).rolling(5).mean()
+    logger.debug(f"Created 'Bearish_Trend' with mean: {dataFrame['Bearish_Trend'].mean():.2f}")
+    
+    dataFrame['Wick_to_Body_Ratio'] = (dataFrame['upperWick'] + dataFrame['lowerWick']) / (dataFrame['Body'].abs() + 1e-6)
+    logger.debug(f"Created 'Wick_to_Body_Ratio' with mean: {dataFrame['Wick_to_Body_Ratio'].mean():.2f}, std: {dataFrame['Wick_to_Body_Ratio'].std():.2f}")
+    
+    dataFrame['Consecutive_Bullish'] = (dataFrame['Close'] > dataFrame['Open']).rolling(3).sum()
+    dataFrame['Consecutive_Bearish'] = (dataFrame['Close'] < dataFrame['Open']).rolling(3).sum()
+    logger.debug(f"Created 'Consecutive_Bullish' with mean: {dataFrame['Consecutive_Bullish'].mean():.2f}")
+    logger.debug(f"Created 'Consecutive_Bearish' with mean: {dataFrame['Consecutive_Bearish'].mean():.2f}")
+
     # -------- Momentum/ Trend Indicators -------- #
     dataFrame['RSI'] = ta.rsi(dataFrame['Close'], length=14)
-    logger.debug("Created 'RSI' with mean: %.2f, std: %.2f", dataFrame['RSI'].mean(), dataFrame['RSI'].std())
+    logger.debug(f"Created 'RSI' with mean: {dataFrame['RSI'].mean():.2f}, std: {dataFrame['RSI'].std():.2f}")
     dataFrame['rsi_momentum'] = dataFrame['RSI'].diff(5)
     
     macd_data = ta.macd(dataFrame['Close'])
     dataFrame['MACD'] = macd_data['MACD_12_26_9']
     dataFrame['MACDSignal'] = macd_data['MACDs_12_26_9']
-    logger.debug("Created MACD features: MACD range [%.2f, %.2f], MACDSignal range [%.2f, %.2f]",
-                    dataFrame['MACD'].min(), dataFrame['MACD'].max(),
-                    dataFrame['MACDSignal'].min(), dataFrame['MACDSignal'].max())
-    
+    logger.debug(f"Created MACD features: MACD range [{dataFrame['MACD'].min():.2f}, {dataFrame['MACD'].max():.2f}], MACDSignal range [{dataFrame['MACDSignal'].min():.2f}, {dataFrame['MACDSignal'].max():.2f}]")
+
     dataFrame['SMA_20'] = dataFrame['Close'].rolling(window=20).mean()
     dataFrame['SMA_50'] = dataFrame['Close'].rolling(window=50).mean()
     dataFrame['SMA_200'] = dataFrame['Close'].rolling(window=200).mean()
     if len(dataFrame) < 200:
-        logger.error("Insufficient data for SMA_200 calculation: %d rows available", len(dataFrame))
+        logger.error(f"Insufficient data for SMA_200 calculation: {len(dataFrame)} rows available")
         raise ValueError("Insufficient data for 200-day SMA")
     dataFrame['EMA_12'] = dataFrame['Close'].ewm(span=12, adjust=False).mean()
     dataFrame['EMA_26'] = dataFrame['Close'].ewm(span=26, adjust=False).mean()
@@ -67,17 +116,34 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
         (dataFrame['momentum_1d'] > 0).rolling(5).sum() / 5
     )
     
+    dataFrame['Stochastic_K'] = ta.stoch(dataFrame['High'], dataFrame['Low'], dataFrame['Close'], k=14, d=3, smooth_k=3)['STOCHk_14_3_3']
+    dataFrame['Stochastic_D'] = ta.stoch(dataFrame['High'], dataFrame['Low'], dataFrame['Close'], k=14, d=3, smooth_k=3)['STOCHd_14_3_3']
+    logger.debug(f"Created 'Stochastic_K' with mean: {dataFrame['Stochastic_K'].mean():.2f}, std: {dataFrame['Stochastic_K'].std():.2f}")
+    logger.debug(f"Created 'Stochastic_D' with mean: {dataFrame['Stochastic_D'].mean():.2f}, std: {dataFrame['Stochastic_D'].std():.2f}")
+    
+    dataFrame['Price_RSI_Divergence'] = dataFrame['momentum_5d'] - dataFrame['RSI'].diff(5)
+    logger.debug(f"Created 'Price_RSI_Divergence' with mean: {dataFrame['Price_RSI_Divergence'].mean():.2f}, std: {dataFrame['Price_RSI_Divergence'].std():.2f}")
+    
+    dataFrame['Reversal_Score'] = (
+        (dataFrame['RSI'] < 30).astype(int) - (dataFrame['RSI'] > 70).astype(int) +  # Oversold/overbought
+        (dataFrame['MACD'] > dataFrame['MACDSignal']).astype(int) - (dataFrame['MACD'] < dataFrame['MACDSignal']).astype(int) +  # MACD crossover
+        (dataFrame['Stochastic_K'] < 20).astype(int) - (dataFrame['Stochastic_K'] > 80).astype(int)  # Stochastic thresholds
+    )
+    logger.debug(f"Created 'Reversal_Score' with range: [{dataFrame['Reversal_Score'].min():.2f}, {dataFrame['Reversal_Score'].max():.2f}]")
+
     # --------- Volatility Indicators --------- #
     bb_data = ta.bbands(dataFrame['Close'], length=20, std=2)
     dataFrame['BBHigh'] = bb_data['BBU_20_2.0']
     dataFrame['BBLow'] = bb_data['BBL_20_2.0']
-    logger.debug("Created Bollinger Bands: BBHigh mean %.2f, BBLow mean %.2f",
-                    dataFrame['BBHigh'].mean(), dataFrame['BBLow'].mean())
+    logger.debug(f"Created Bollinger Bands: BBHigh mean {dataFrame['BBHigh'].mean():.2f}, BBLow mean {dataFrame['BBLow'].mean():.2f}")
     
     dataFrame['priceChange'] = dataFrame['Close'].diff()
     dataFrame['closeChangePercentage'] = dataFrame['Close'].pct_change()
     
     dataFrame['averageTrueRange'] = ta.atr(dataFrame['High'], dataFrame['Low'], dataFrame['Close'], length=14)
+    dataFrame['ATR_Normalized_Change'] = dataFrame['closeChangePercentage'] / (dataFrame['averageTrueRange'] / dataFrame['Close'])
+    logger.debug(f"Created 'ATR_Normalized_Change' with mean: {dataFrame['ATR_Normalized_Change'].mean():.2f}, std: {dataFrame['ATR_Normalized_Change'].std():.2f}")
+    
     dataFrame['rollingStd'] = dataFrame['Close'].rolling(window=14).std()
     
     aroon_data = ta.aroon(dataFrame['High'], dataFrame['Low'], length=14)
@@ -88,25 +154,42 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     
     dataFrame['vix_normalized'] = (dataFrame['VIX_Proxy'] - dataFrame['VIX_Proxy'].rolling(126).mean()) / dataFrame['VIX_Proxy'].rolling(126).std()  # Reduced from 252
     dataFrame['vix_regime'] = (dataFrame['VIX_Proxy'] > dataFrame['VIX_Proxy'].rolling(126).quantile(0.75)).astype(int)
-
     
+    dataFrame['Volatility_Breakout_Up'] = (dataFrame['Close'] > dataFrame['BBHigh'] + dataFrame['averageTrueRange']).astype(int)
+    logger.debug(f"Created 'Volatility_Breakout_Up': {dataFrame['Volatility_Breakout_Up'].sum()} events")
+    dataFrame['Volatility_Breakout_Down'] = (dataFrame['Close'] < dataFrame['BBLow'] - dataFrame['averageTrueRange']).astype(int)
+    logger.debug(f"Created 'Volatility_Breakout_Down': {dataFrame['Volatility_Breakout_Down'].sum()} events")
+
     # --------- Volume Indicators --------- #
     dataFrame['volumeChange'] = dataFrame['Volume'].diff()
     dataFrame['volumeRateOfChange'] = (dataFrame['Volume'] - dataFrame['Volume'].shift(12)) / dataFrame['Volume'].shift(12) * 100
     
     dataFrame['onBalanceVolume'] = ta.obv(dataFrame['Close'], dataFrame['Volume'])
-    logger.debug("Created 'onBalanceVolume' with mean: %.2f, std: %.2f",
-                    dataFrame['onBalanceVolume'].mean(), dataFrame['onBalanceVolume'].std())
+    logger.debug(f"Created 'onBalanceVolume' with mean: {dataFrame['onBalanceVolume'].mean():.2f}, std: {dataFrame['onBalanceVolume'].std():.2f}")
 
     dataFrame['chaikinMoneyFlow'] = ta.cmf(dataFrame['High'], dataFrame['Low'], dataFrame['Close'], dataFrame['Volume'], length=20)
-    logger.debug("Created 'chaikinMoneyFlow' with mean: %.2f, std: %.2f",
-                    dataFrame['chaikinMoneyFlow'].mean(), dataFrame['chaikinMoneyFlow'].std())
+    logger.debug(f"Created 'chaikinMoneyFlow' with mean: {dataFrame['chaikinMoneyFlow'].mean():.2f}, std: {dataFrame['chaikinMoneyFlow'].std():.2f}")
 
     # Force Index - using custom calculation as pandas-ta might not have exact equivalent
     dataFrame['forceIndex'] = (dataFrame['Close'] - dataFrame['Close'].shift(1)) * dataFrame['Volume']
     dataFrame['forceIndex'] = dataFrame['forceIndex'].rolling(window=20).mean()
-    logger.debug("Created 'forceIndex' with mean: %.2f, std: %.2f",
-                    dataFrame['forceIndex'].mean(), dataFrame['forceIndex'].std())
+    logger.debug(f"Created 'forceIndex' with mean: {dataFrame['forceIndex'].mean():.2f}, std: {dataFrame['forceIndex'].std():.2f}")
+
+    dataFrame['Volume_Breakout_Up'] = (
+        (dataFrame['Close'] > dataFrame['BBHigh']) & 
+        (dataFrame['volume_surge'] > 1.5)
+    ).astype(int)
+    logger.debug(f"Created 'Volume_Breakout_Up': {dataFrame['Volume_Breakout_Up'].sum()} events")
+    dataFrame['Volume_Breakout_Down'] = (
+        (dataFrame['Close'] < dataFrame['BBLow']) & 
+        (dataFrame['volume_surge'] > 1.5)
+    ).astype(int)
+    logger.debug(f"Created 'Volume_Breakout_Down': {dataFrame['Volume_Breakout_Down'].sum()} events")
+    
+    dataFrame['Volume_Price_Divergence'] = (
+    dataFrame['volume_surge'] - dataFrame['momentum_5d'].abs()
+    )
+    logger.debug(f"Created 'Volume_Price_Divergence' with mean: {dataFrame['Volume_Price_Divergence'].mean():.2f}, std: {dataFrame['Volume_Price_Divergence'].std():.2f}")
 
     # Negative Volume Index - using custom calculation
     nvi = []
@@ -119,8 +202,7 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
                 nvi_value = nvi_value * (dataFrame['Close'].iloc[i] / dataFrame['Close'].iloc[i-1])
             nvi.append(nvi_value)
     dataFrame['negativeVolumeIndex'] = nvi
-    logger.debug("Created 'negativeVolumeIndex' with mean: %.2f, std: %.2f",
-                    dataFrame['negativeVolumeIndex'].mean(), dataFrame['negativeVolumeIndex'].std())
+    logger.debug(f"Created 'negativeVolumeIndex' with mean: {dataFrame['negativeVolumeIndex'].mean():.2f}, std: {dataFrame['negativeVolumeIndex'].std():.2f}")
 
     dataFrame['rolling_vol_5'] = dataFrame['Close'].pct_change().rolling(5).std()
     dataFrame['rolling_vol_21'] = dataFrame['Close'].pct_change().rolling(21).std()
@@ -141,13 +223,6 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
         dataFrame['volume_surge'] - dataFrame['Close'].pct_change().abs().rolling(5).mean()
     )
     
-    # -------- Candle Indicators --------- #
-    dataFrame['Body'] = dataFrame['Close'] - dataFrame['Open']
-    dataFrame['upperWick'] = dataFrame['High'] - dataFrame[['Close', 'Open']].max(axis=1)
-    dataFrame['lowerWick'] = dataFrame[['Close', 'Open']].min(axis=1) - dataFrame['Low']
-    logger.debug("Created candle features: Body mean %.2f, upperWick mean %.2f, lowerWick mean %.2f",
-                    dataFrame['Body'].mean(), dataFrame['upperWick'].mean(), dataFrame['lowerWick'].mean())
-
     # --------- Statistical Indicators --------- #
     dataFrame['sigma'] = dataFrame['Close'].rolling(window=20).std()
     dataFrame['beta'] = dataFrame['Close'].rolling(window=20).cov(dataFrame['Volume']) / dataFrame['Volume'].rolling(window=20).var()   
@@ -186,28 +261,19 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
         dataFrame['tech_leadership'] * 
         dataFrame['semiconductor_strength']
     )
-    logger.debug("Created 'ai_momentum_strength' with range: [%.2f, %.2f]", 
-                    dataFrame['ai_momentum_strength'].min(), 
-                    dataFrame['ai_momentum_strength'].max()
-                    )
-    
+    logger.debug(f"Created 'ai_momentum_strength' with range: [{dataFrame['ai_momentum_strength'].min():.2f}, {dataFrame['ai_momentum_strength'].max():.2f}]")
+
     dataFrame['momentum_acceleration'] = (
         dataFrame['ai_momentum_strength'].diff(1) + 
         dataFrame['ai_momentum_strength'].diff(2)
     ) / 2
-    logger.debug("Created 'momentum_acceleration' with mean: %.2f, std: %.2f",
-                    dataFrame['momentum_acceleration'].mean(),
-                    dataFrame['momentum_acceleration'].std()
-                    )
+    logger.debug(f"Created 'momentum_acceleration' with mean: {dataFrame['momentum_acceleration'].mean():.2f}, std: {dataFrame['momentum_acceleration'].std():.2f}")
 
     dataFrame['confirmed_momentum'] = (
         dataFrame['ai_momentum_strength'] * 
         (dataFrame['volume_surge'] > 1).astype(float)
     )
-    logger.debug("Created 'confirmed_momentum' with mean: %.2f, std: %.2f",
-                    dataFrame['confirmed_momentum'].mean(),
-                    dataFrame['confirmed_momentum'].std()
-                    )
+    logger.debug(f"Created 'confirmed_momentum' with mean: {dataFrame['confirmed_momentum'].mean():.2f}, std: {dataFrame['confirmed_momentum'].std():.2f}")
 
     # --------- Cross-Asset Correlations --------- #
     dataFrame['vix_spread'] = dataFrame['VIX_Proxy'] - dataFrame['VIX_Proxy'].rolling(20).mean()
@@ -215,6 +281,13 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['qqq_nvda_correlation'] = dataFrame['Close'].pct_change().rolling(20).corr(dataFrame['QQQ_Close'].pct_change())
     dataFrame['treasury_equity_spread'] = dataFrame['Treasury_10Y'].diff() * -1  # Inverse relationship with equities
     
+    dataFrame['Sector_Direction_Divergence'] = (
+        dataFrame['momentum_5d'] - dataFrame['SOXX_Close'].pct_change(5)
+    )
+    logger.debug(f"Created 'Sector_Direction_Divergence' with mean: {dataFrame['Sector_Direction_Divergence'].mean():.2f}, std: {dataFrame['Sector_Direction_Divergence'].std():.2f}")
+    
+    dataFrame['VIX_Direction_Signal'] = (dataFrame['VIX_Proxy'] > dataFrame['VIX_Proxy'].rolling(20).quantile(0.9)).astype(int)
+    logger.debug(f"Created 'VIX_Direction_Signal': {dataFrame['VIX_Direction_Signal'].sum()} high VIX events")
     
     # --------- Trend and Breakout Indicators --------- #
     dataFrame['trend_strength'] = (dataFrame['Close'] > dataFrame['SMA_200']).rolling(20).mean()
@@ -227,6 +300,18 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['price_vs_bb_position'] = (dataFrame['Close'] - dataFrame['BBLow']) / (dataFrame['BBHigh'] - dataFrame['BBLow'])
     dataFrame['breakout_signal'] = (dataFrame['Close'] > dataFrame['BBHigh']).astype(int)
     
+    dataFrame['Time_Since_Breakout'] = 0
+    breakout_indices = dataFrame[(dataFrame['breakout_signal'] == 1) | 
+                            (dataFrame['Volatility_Breakout_Up'] == 1) | 
+                            (dataFrame['Volatility_Breakout_Down'] == 1)].index
+    for i in range(len(dataFrame)):
+        if i == 0:
+            continue
+    last_breakout = max([idx for idx in breakout_indices if idx <= dataFrame.index[i]], default=dataFrame.index[0])
+    # Use .loc to avoid chained-assignment and to be compatible with pandas Copy-on-Write
+    dataFrame.loc[dataFrame.index[i], 'Time_Since_Breakout'] = (dataFrame.index[i] - last_breakout).days
+    logger.debug(f"Created 'Time_Since_Breakout' with mean: {dataFrame['Time_Since_Breakout'].mean():.2f}")
+
     # --------- Seasonal Indicators --------- #
     dataFrame['days_in_quarter'] = (dataFrame.index.dayofyear % 90)
     dataFrame['earnings_proximity'] = np.where(
@@ -237,12 +322,9 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame['Price_Target'] = dataFrame['Close'].shift(-1)
     logger.debug("Shifted 'Price_Target' column for next-day prediction")
     dataFrame['direction_pct'] = ((dataFrame['Price_Target'] - dataFrame['Close']) / dataFrame['Close']) * 100
-    logger.debug("Calculated 'direction_pct' with mean: %.2f, std: %.2f",
-                    dataFrame['direction_pct'].mean(),
-                    dataFrame['direction_pct'].std()
-                    )
+    logger.debug(f"Calculated 'direction_pct' with mean: {dataFrame['direction_pct'].mean():.2f}, std: {dataFrame['direction_pct'].std():.2f}")
 
-    threshold = 0.5
+    threshold = dataFrame['averageTrueRange'].rolling(20).mean() * 1.5
     dataFrame['Direction_Target'] = 1  # Default to sideways
     dataFrame.loc[dataFrame['direction_pct'] > threshold, 'Direction_Target'] = 2  # Strong up
     dataFrame.loc[(-threshold < dataFrame['direction_pct']) & (dataFrame['direction_pct'] < threshold), 'Direction_Target'] = 1  # Sideways
@@ -255,9 +337,9 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     total_values = dataFrame.size
     if nan_count > 0:
         nan_pct = (nan_count / total_values) * 100
-        logger.warning("Found %d NaN values in final DataFrame (%.2f%% of all values)", nan_count, nan_pct)
+        logger.warning(f"Found {nan_count} NaN values in final DataFrame ({nan_pct:.2f}% of all values)")
     dataFrame.dropna(inplace=True)  # Drop NaN values after shifting target
-    logger.debug("Rows dropped after NaN removal: %d", dataFrame.shape[0])
+    logger.debug(f"Rows dropped after NaN removal: {dataFrame.shape[0]}")
     dataFrame['Direction_Target'] = dataFrame['Direction_Target'].astype(int)
     logger.info("Converted 'Direction_Target' to integer type")
 
