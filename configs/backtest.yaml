@@ -15,7 +15,7 @@ features:
   preprocessing_data_path: data/preprocessing/nvda_preprocessed_evaluate_data.csv
 
 data_module:
-  window_size: 10
+  window_size: 5
   target_cols: ["Price_Target", "Direction_Target"]
   feature_scaler_path: models/feature_scaler.pkl
   target_scaler_path: models/Price_Target_scaler.pkl

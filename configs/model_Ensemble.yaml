@@ -1,25 +1,25 @@
 model:
   target_sequence_length: 1  # Predicting the next closing price
-  huber_delta: 1.8549433567367808  # Delta for Huber loss, can be adjusted based on the dataset
+  huber_delta: 2.516163107358062  # Delta for Huber loss, can be adjusted based on the dataset
   # non-normalized weighted averaging of CNN and ElasticNet regression outputs #
   
-  price_loss_weight: 0.5431916463662666
-  direction_loss_weight: 0.6623030332008446
-  orthogonal_lambda: 1.3173833310098858e-05
-  focal_alpha: 0.9583377576276101 # Alpha parameter for Focal Loss, can be adjusted based on class imbalance
-  focal_gamma: 1.3702469841501808  # Gamma parameter for Focal Loss, can be adjusted based on class imbalance
-  focal_beta: 0.9999  # Beta parameter for Focal Loss, can be adjusted based on class imbalance
+  price_loss_weight: 0.522553591966669
+  direction_loss_weight: 0.7843898503992107
+  orthogonal_lambda: 0.17775825546595142
+  focal_alpha: 0.6078464280406355 # Alpha parameter for Focal Loss, can be adjusted based on class imbalance
+  focal_gamma: 4.519494240423438  # Gamma parameter for Focal Loss, can be adjusted based on class imbalance
+  focal_beta: 0.32060861991037426  # Beta parameter for Focal Loss, can be adjusted based on class imbalance
   # Direction threshold is set during feature engineering.
 
   use_meta_learning: true  # Enable/disable meta-learning
   include_base_losses: true  # Include base model losses in training
-  meta_price_loss_weight: 0.7187958071059687
-  meta_direction_loss_weight: 0.782274178616022
+  meta_price_loss_weight:  0.5017565395318231
+  meta_direction_loss_weight: 1.224786001971306
 
-  price_cnn_weight: 1.1332970774225237
-  direction_cnn_weight: 0.10496794356330505
-  elasticNet_weight: 0.9885059034354798
-  ridge_weight: 0.28352079150769954
+  price_cnn_weight: 0.6079509612866073
+  direction_cnn_weight: 0.27332771706500925
+  elasticNet_weight: 1.2333934401222826
+  ridge_weight: 1.449885211852526
 
   cnnPath: models/cnn_model.pth
   elasticNetPath: models/elastic_net_model.pth
@@ -29,37 +29,37 @@ model:
 
 cnn:
   inputChannels: 96  # Number of features (RSI, MACD, etc.)
-  cnnChannels: [96, 96, 24]  # Reduced capacity to prevent overfitting
-  kernelSize: [3, 2, 3]
-  poolSize: [2, 5, 4]  # Pooling after each CNN layer
+  cnnChannels: [16, 48, 128]  # Reduced capacity to prevent overfitting
+  kernelSize: [2, 5, 5]
+  poolSize: [2, 3, 2]  # Pooling after each CNN layer
   poolPadding: [0, 0, 0]
-  padding: [2, 1, 2]  # kernel_size // 2 for each dimension
-  stride: 1
-  dropout: [0.33511434658441164, 0.4219147906121053]
+  padding: [1, 2, 3]  # kernel_size // 2 for each dimension
+  stride: 2
+  dropout: [0.4852957761235601, 0.20559207295165977]
   outputSize: 1
   num_classes: 3
 
 Ridge:
-  alpha: 0.007174681323048412  # Regularization strength for Ridge regression, can be adjusted based on the dataset
+  alpha: 0.0021123795371517087  # Regularization strength for Ridge regression, can be adjusted based on the dataset
   fit_intercept: True
-  eps: 3.654692250034669e-10
+  eps: 4.0921764319313715e-07
 
 ElasticNet:
-  alpha: 0.0019215453483378447  # Regularization strength for ElasticNet, can be adjusted based on the dataset
-  l1_ratio: 0.3407217210497724  # Mix ratio between L1 and L2 regularization
+  alpha: 232.4445063693895  # Regularization strength for ElasticNet, can be adjusted based on the dataset
+  l1_ratio: 0.013503899061622068  # Mix ratio between L1 and L2 regularization
   fit_intercept: True
-  tol: 2.584719451264841e-08  # Tolerance for stopping criteria
-  max_iter: 3000  # Maximum number of iterations
-  eps: 1.275897934062148e-07
+  tol: 0.0005881174734563266  # Tolerance for stopping criteria
+  max_iter: 2000  # Maximum number of iterations
+  eps: 1.0016410962741585e-08
 
 optimiser:
   name: 'adam'
-  base_lr: 2.2557019950058647e-07
-  meta_lr: 0.005928951883812553
-  weightDecay: 3.766980489524889e-08  # L2 regularization term 
-  eps: 4.5462866408838897e-10
+  base_lr: 1.1184368921509642e-05
+  meta_lr: 0.0025091223135881133
+  weightDecay: 0.002987983775143476  # L2 regularization term 
+  eps: 1.2526334356750563e-10
   amsgrad: False  # Whether to use AMSGrad variant of Adam
   schedulerMode: 'min'
-  schedulerFactor: 0.5899961153640523
-  schedulerPatience: 7
-  schedulerMinLR: 4.0217446295505134e-05
+  schedulerFactor: 0.17951652539957985
+  schedulerPatience: 15
+  schedulerMinLR: 4.0880471836742325e-09
