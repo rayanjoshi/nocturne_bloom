@@ -18,11 +18,11 @@ model:
 
   price_cnn_weight: 0.6079509612866073
   direction_cnn_weight: 0.27332771706500925
-  elasticNet_weight: 1.2333934401222826
+  lstm_weight: 1.2333934401222826
   ridge_weight: 1.449885211852526
 
   cnnPath: models/cnn_model.pth
-  elasticNetPath: models/elastic_net_model.pth
+  lstmPath: models/lstm_model.pth
   ridgePath: models/ridge_model.pth
   meta_price_path: models/meta_price_model.pth
   meta_direction_path: models/meta_direction_model.pth
@@ -44,13 +44,10 @@ Ridge:
   fit_intercept: True
   eps: 4.0921764319313715e-07
 
-ElasticNet:
-  alpha: 232.4445063693895  # Regularization strength for ElasticNet, can be adjusted based on the dataset
-  l1_ratio: 0.013503899061622068  # Mix ratio between L1 and L2 regularization
-  fit_intercept: True
-  tol: 0.0005881174734563266  # Tolerance for stopping criteria
-  max_iter: 2000  # Maximum number of iterations
-  eps: 1.0016410962741585e-08
+LSTM:
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.3
 
 optimiser:
   name: 'adam'
