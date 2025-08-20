@@ -85,22 +85,20 @@ def optuna_search_space(trial):
         "ridge_alpha": trial.suggest_float("ridge_alpha", 1e-4, 1e2, log=True),
         "ridge_eps": trial.suggest_float("ridge_eps", 1e-10, 1e-6, log=True),
         
-        # ElasticNet parameters - comprehensive tuning
-        "elastic_alpha": trial.suggest_float("elastic_alpha", 1e-6, 1e3, log=True),
-        "elastic_l1_ratio": trial.suggest_float("elastic_l1_ratio", 0.001, 0.999, step=0.001),
-        "elastic_max_iter": trial.suggest_categorical("elastic_max_iter", [200, 500, 1000, 1500, 2000, 3000]),
-        "elastic_tol": trial.suggest_float("elastic_tol", 1e-8, 1e-2, log=True),
-        "elastic_eps": trial.suggest_float("elastic_eps", 1e-12, 1e-5, log=True),
+        # LSTM parameters
+        "lstm_hidden_size": trial.suggest_int("lstm_hidden_size", 64, 256, step=16),
+        "lstm_num_layers": trial.suggest_int("lstm_num_layers", 1, 3),
+        "lstm_dropout": trial.suggest_float("lstm_dropout", 0.1, 0.5, step=0.1),
         
         # Ensemble weights - fine-grained control for balance
-        "price_cnn_weight_raw": trial.suggest_float("price_cnn_weight_raw", 0.1, 2.0, step=0.01),
-        "ridge_weight_raw": trial.suggest_float("ridge_weight_raw", 0.1, 2.0, step=0.01),
-        "direction_cnn_weight_raw": trial.suggest_float("direction_cnn_weight_raw", 0.1, 2.0, step=0.01),
-        "elastic_weight_raw": trial.suggest_float("elastic_weight_raw", 0.1, 2.0, step=0.01),
+        "price_cnn_weight": trial.suggest_float("price_cnn_weight", 0.1, 2.0, step=0.01),
+        "ridge_weight": trial.suggest_float("ridge_weight", 0.1, 2.0, step=0.01),
+        "direction_cnn_weight": trial.suggest_float("direction_cnn_weight", 0.1, 2.0, step=0.01),
+        "lstm_weight": trial.suggest_float("lstm_weight", 0.1, 2.0, step=0.01),
         
         # Loss weights - critical for MAE vs accuracy balance
-        "price_loss_weight_raw": trial.suggest_float("price_loss_weight_raw", 0.1, 0.9, step=0.01),
-        "direction_loss_weight_raw": trial.suggest_float("direction_loss_weight_raw", 0.1, 0.9, step=0.01),
+        "price_loss_weight": trial.suggest_float("price_loss_weight", 0.1, 0.9, step=0.01),
+        "direction_loss_weight": trial.suggest_float("direction_loss_weight", 0.1, 0.9, step=0.01),
         "orthogonal_lambda": trial.suggest_float("orthogonal_lambda", 1e-6, 1e2, step=0.1),
         # Huber loss parameter - important for price prediction robustness
         "huber_delta": trial.suggest_float("huber_delta", 0.01, 5.0, step=0.01),
@@ -108,7 +106,7 @@ def optuna_search_space(trial):
         # Focal loss parameters - important for class imbalance
         "focal_gamma": trial.suggest_float("focal_gamma", 0.5, 5.0, step=0.1),
         "focal_alpha": trial.suggest_float("focal_alpha", 0.0, 1.0, step=0.01),
-        "focal_beta": trial.suggest_float("focal_beta", 0.0, 1.0, step=0.01),
+        "focal_beta": trial.suggest_float("focal_beta", 0.9, 0.9999, step=0.001),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": trial.suggest_float("weight_decay", 1e-8, 1e-1, log=True),
@@ -178,23 +176,21 @@ def get_ray_tune_search_space():
         # Ridge parameters - expanded range
         "ridge_alpha": tune.loguniform(1e-4, 1e2),
         "ridge_eps": tune.loguniform(1e-10, 1e-6),
-        
-        # ElasticNet parameters - comprehensive tuning
-        "elastic_alpha": tune.loguniform(1e-6, 1e3),
-        "elastic_l1_ratio": tune.uniform(0.001, 0.999),
-        "elastic_max_iter": tune.choice([200, 500, 1000, 1500, 2000, 3000]),
-        "elastic_tol": tune.loguniform(1e-8, 1e-2),
-        "elastic_eps": tune.loguniform(1e-12, 1e-5),
-        
+
+        # LSTM parameters
+        "lstm_hidden_size": tune.choice([64, 128, 256]),
+        "lstm_num_layers": tune.choice([1, 2, 3]),
+        "lstm_dropout": tune.uniform(0.1, 0.5),
+
         # Ensemble weights - fine-grained control for balance
-        "price_cnn_weight_raw": tune.uniform(0.1, 2.0),
-        "ridge_weight_raw": tune.uniform(0.1, 2.0),
-        "direction_cnn_weight_raw": tune.uniform(0.1, 2.0),
-        "elastic_weight_raw": tune.uniform(0.1, 2.0),
+        "price_cnn_weight": tune.uniform(0.1, 2.0),
+        "ridge_weight": tune.uniform(0.1, 2.0),
+        "direction_cnn_weight": tune.uniform(0.1, 2.0),
+        "elastic_weight": tune.uniform(0.1, 2.0),
         "orthongonal_lambda": tune.loguniform(1e-6,1e2),
         # Loss weights - critical for MAE vs accuracy balance
-        "price_loss_weight_raw": tune.uniform(0.1, 0.9),
-        "direction_loss_weight_raw": tune.uniform(0.1, 0.9),
+        "price_loss_weight": tune.uniform(0.1, 0.9),
+        "direction_loss_weight": tune.uniform(0.1, 0.9),
         
         # Huber loss parameter - important for price prediction robustness
         "huber_delta": tune.uniform(0.01, 5.0),
@@ -202,7 +198,7 @@ def get_ray_tune_search_space():
         # Focal loss parameters - important for class imbalance
         "focal_gamma": tune.uniform(0.5, 5.0),
         "focal_alpha": tune.uniform( 0.0, 1.0),
-        "focal_beta": tune.uniform(0.0, 1.0),
+        "focal_beta": tune.uniform(0.9, 0.9999),
         
         # Optimizer parameters - comprehensive tuning
         "weight_decay": tune.loguniform(1e-8, 1e-1),
@@ -276,30 +272,28 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     cfg_dict['Ridge']['alpha'] = trial_params["ridge_alpha"]
     cfg_dict['Ridge']['eps'] = trial_params.get("ridge_eps", 1e-8)
     
-    # Update ElasticNet parameters comprehensively
-    cfg_dict['ElasticNet']['alpha'] = trial_params["elastic_alpha"]
-    cfg_dict['ElasticNet']['l1_ratio'] = trial_params["elastic_l1_ratio"]
-    cfg_dict['ElasticNet']['max_iter'] = trial_params["elastic_max_iter"]
-    cfg_dict['ElasticNet']['tol'] = trial_params["elastic_tol"]
-    cfg_dict['ElasticNet']['eps'] = trial_params["elastic_eps"]
-    
+    # Update LSTM parameters comprehensively
+    cfg_dict['LSTM']['hidden_size'] = trial_params.get("lstm_hidden_size", 128)
+    cfg_dict['LSTM']['num_layers'] = trial_params.get("lstm_num_layers", 2)
+    cfg_dict['LSTM']['dropout'] = trial_params.get("lstm_dropout", 0.3)
+
     # Normalize and update ensemble weights for optimal balance
-    price_total = trial_params["price_cnn_weight_raw"] + trial_params["ridge_weight_raw"]
-    cfg_dict['model']['price_cnn_weight'] = trial_params["price_cnn_weight_raw"] / price_total
-    cfg_dict['model']['ridge_weight'] = trial_params["ridge_weight_raw"] / price_total
-    
-    direction_total = trial_params["direction_cnn_weight_raw"] + trial_params["elastic_weight_raw"]
-    cfg_dict['model']['direction_cnn_weight'] = trial_params["direction_cnn_weight_raw"] / direction_total
-    cfg_dict['model']['elasticNet_weight'] = trial_params["elastic_weight_raw"] / direction_total
-    
+    price_total = trial_params["price_cnn_weight"] + trial_params["ridge_weight"]
+    cfg_dict['model']['price_cnn_weight'] = trial_params["price_cnn_weight"] / price_total
+    cfg_dict['model']['ridge_weight'] = trial_params["ridge_weight"] / price_total
+
+    direction_total = trial_params["direction_cnn_weight"] + trial_params["elastic_weight"]
+    cfg_dict['model']['direction_cnn_weight'] = trial_params["direction_cnn_weight"] / direction_total
+    cfg_dict['model']['elasticNet_weight'] = trial_params["elastic_weight"] / direction_total
+
     # Normalize and update loss weights - critical for MAE vs accuracy trade-off
-    loss_total = trial_params["price_loss_weight_raw"] + trial_params["direction_loss_weight_raw"]
-    cfg_dict['model']['price_loss_weight'] = trial_params["price_loss_weight_raw"] / loss_total
-    cfg_dict['model']['direction_loss_weight'] = trial_params["direction_loss_weight_raw"] / loss_total
+    loss_total = trial_params["price_loss_weight"] + trial_params["direction_loss_weight"]
+    cfg_dict['model']['price_loss_weight'] = trial_params["price_loss_weight"] / loss_total
+    cfg_dict['model']['direction_loss_weight'] = trial_params["direction_loss_weight"] / loss_total
     cfg_dict['model']['orthogonal_lambda'] = trial_params.get("orthogonal_lambda", 0.1)
     cfg_dict['model']['focal_gamma'] = trial_params.get("focal_gamma", 2.0)
     cfg_dict['model']['focal_alpha'] = trial_params.get("focal_alpha", 0.25)
-    cfg_dict['model']['focal_beta'] = trial_params.get("focal_beta", 0.999)
+    cfg_dict['model']['focal_beta'] = trial_params.get("focal_beta", 0.9999)
 
     # Update model parameters
     cfg_dict['model']['huber_delta'] = trial_params["huber_delta"]
@@ -391,7 +385,7 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
                 val_loss = val_results[0].get("val_loss", float('inf'))
                 
                 # Calculate multi-objective score
-                metric_calculator = MultiObjectiveMetric(mae_weight=0.2, acc_weight=0.8, mae_scale=1.0)
+                metric_calculator = MultiObjectiveMetric(mae_weight=0.4, acc_weight=0.6, mae_scale=1.0)
                 multi_objective_score = metric_calculator(val_mae, val_direction_acc)
                 
                 # Report all metrics
