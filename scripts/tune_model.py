@@ -284,6 +284,7 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
 
     direction_total = trial_params["direction_cnn_weight"] + trial_params["lstm_weight"]
     cfg_dict['model']['direction_cnn_weight'] = trial_params["direction_cnn_weight"] / direction_total
+    cfg_dict['model']['lstm_weight'] = trial_params["lstm_weight"] / direction_total
 
     # Normalize and update loss weights - critical for MAE vs accuracy trade-off
     loss_total = trial_params["price_loss_weight"] + trial_params["direction_loss_weight"]
