@@ -11,6 +11,6 @@ trainer:
   devices: 1
   log_every_n_steps: 10  # Optimized logging frequency
   seed: 42  # Optimized seed for reproducibility
-  early_stopping_patience: 12  # Stop if no improvement for 12 epochs
-  early_stopping_delta: 0.003079650790946049  # Optimized delta for early stopping
-  gradient_clip_val: 4.744781895540364  # Gradient clipping to prevent exploding gradients
+  early_stopping_patience: 20  # Stop if no improvement for 20 epochs
+  early_stopping_delta: 4.656566625740723e-05  # Optimized delta for early stopping
+  gradient_clip_val: 2.3259093705538745  # Gradient clipping to prevent exploding gradients
