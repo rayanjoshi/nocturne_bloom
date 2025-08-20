@@ -186,8 +186,8 @@ def get_ray_tune_search_space():
         "price_cnn_weight": tune.uniform(0.1, 2.0),
         "ridge_weight": tune.uniform(0.1, 2.0),
         "direction_cnn_weight": tune.uniform(0.1, 2.0),
-        "elastic_weight": tune.uniform(0.1, 2.0),
-        "orthongonal_lambda": tune.loguniform(1e-6,1e2),
+        "lstm_weight": tune.uniform(0.1, 2.0),
+        "orthogonal_lambda": tune.loguniform(1e-6,1e2),
         # Loss weights - critical for MAE vs accuracy balance
         "price_loss_weight": tune.uniform(0.1, 0.9),
         "direction_loss_weight": tune.uniform(0.1, 0.9),
@@ -282,9 +282,8 @@ def update_config_from_trial_params(base_cfg: DictConfig, trial_params: Dict[str
     cfg_dict['model']['price_cnn_weight'] = trial_params["price_cnn_weight"] / price_total
     cfg_dict['model']['ridge_weight'] = trial_params["ridge_weight"] / price_total
 
-    direction_total = trial_params["direction_cnn_weight"] + trial_params["elastic_weight"]
+    direction_total = trial_params["direction_cnn_weight"] + trial_params["lstm_weight"]
     cfg_dict['model']['direction_cnn_weight'] = trial_params["direction_cnn_weight"] / direction_total
-    cfg_dict['model']['elasticNet_weight'] = trial_params["elastic_weight"] / direction_total
 
     # Normalize and update loss weights - critical for MAE vs accuracy trade-off
     loss_total = trial_params["price_loss_weight"] + trial_params["direction_loss_weight"]
@@ -508,7 +507,6 @@ def main(cfg: DictConfig):
         parameter_columns=[
             "base_lr",
             "meta_lr",
-            "elastic_alpha",
             "ridge_alpha",
             "price_loss_weight_raw",
             "direction_loss_weight_raw",
