@@ -8,7 +8,7 @@ model:
   orthogonal_lambda: 88.71267542479445
   focal_alpha: 0.6219565211521811 # Alpha parameter for Focal Loss, can be adjusted based on class imbalance
   focal_gamma: 4.622938411900545  # Gamma parameter for Focal Loss, can be adjusted based on class imbalance
-  focal_beta: 0.9488585788984044  # Beta parameter for Focal Loss, can be adjusted based on class imbalance
+  focal_beta: 0.9988585788984044  # Beta parameter for Focal Loss, can be adjusted based on class imbalance
   # Direction threshold is set during feature engineering.
 
   use_meta_learning: true  # Enable/disable meta-learning
@@ -30,7 +30,7 @@ model:
 cnn:
   inputChannels: 119  # Number of features (RSI, MACD, etc.)
   cnnChannels: [32, 16, 24]  # Reduced capacity to prevent overfitting
-  kernelSize: [2, 1, 2]
+  kernelSize: [1, 1, 1]
   poolSize: [5, 3, 5]  # Pooling after each CNN layer
   poolPadding: [0, 0, 0]
   padding: [3, 0, 0]  # kernel_size // 2 for each dimension
