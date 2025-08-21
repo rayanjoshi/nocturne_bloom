@@ -329,9 +329,7 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
     dataFrame.loc[dataFrame['direction_pct'] > threshold, 'Direction_Target'] = 2  # Strong up
     dataFrame.loc[(-threshold < dataFrame['direction_pct']) & (dataFrame['direction_pct'] < threshold), 'Direction_Target'] = 1  # Sideways
     dataFrame.loc[dataFrame['direction_pct'] < -threshold, 'Direction_Target'] = 0  # Strong down
-    logger.debug("Created 'Direction_Target' before shifting")
-    dataFrame['Direction_Target'] = dataFrame['Direction_Target'].shift(-1)
-    logger.debug("Shifted 'Direction_Target' to align with current day's features")
+    logger.debug("'Direction_Target' already shifted for next day prediction")
 
     nan_count = dataFrame.isna().sum().sum()
     total_values = dataFrame.size
