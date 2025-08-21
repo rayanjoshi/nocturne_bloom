@@ -318,19 +318,35 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
         dataFrame['days_in_quarter'].isin([1, 2, 3, 88, 89, 0]), 1, 0
     )
     
-    # Shift target column by -1 for next-day prediction BEFORE dropping NaN
+    # Shifted next-day price
     dataFrame['Price_Target'] = dataFrame['Close'].shift(-1)
     logger.debug("Shifted 'Price_Target' column for next-day prediction")
+    
+    # Calculate percentage change
     dataFrame['direction_pct'] = ((dataFrame['Price_Target'] - dataFrame['Close']) / dataFrame['Close']) * 100
     logger.debug(f"Calculated 'direction_pct' with mean: {dataFrame['direction_pct'].mean():.2f}, std: {dataFrame['direction_pct'].std():.2f}")
-
-    threshold = dataFrame['averageTrueRange'].rolling(20).mean() * 1.5
-    dataFrame['Direction_Target'] = 1  # Default to sideways
-    dataFrame.loc[dataFrame['direction_pct'] > threshold, 'Direction_Target'] = 2  # Strong up
-    dataFrame.loc[(-threshold < dataFrame['direction_pct']) & (dataFrame['direction_pct'] < threshold), 'Direction_Target'] = 1  # Sideways
-    dataFrame.loc[dataFrame['direction_pct'] < -threshold, 'Direction_Target'] = 0  # Strong down
+    
+    # Fixed minimum threshold: 0.5%
+    fixed_thresh = 0.5
+    
+    # Rolling ATR-based adaptive threshold (20-day window, scaled)
+    atr_window = 20
+    atr_multiplier = 1.5
+    atr_thresh = dataFrame['averageTrueRange'].rolling(atr_window).mean() * atr_multiplier
+    
+    # Combine thresholds: use the max between fixed and ATR-based
+    hybrid_thresh = np.maximum(fixed_thresh, atr_thresh)
+    logger.debug(f"Hybrid threshold calculated with mean: {hybrid_thresh.mean():.2f}")
+    
+    # Step 4: Initialize Direction_Target as sideways (1)
+    dataFrame['Direction_Target'] = 1
+    
+    # Step 5: Assign directional labels
+    dataFrame.loc[dataFrame['direction_pct'] > hybrid_thresh, 'Direction_Target'] = 2  # Up
+    dataFrame.loc[dataFrame['direction_pct'] < -hybrid_thresh, 'Direction_Target'] = 0  # Down
+    
     logger.debug("'Direction_Target' already shifted for next day prediction")
-
+    
     nan_count = dataFrame.isna().sum().sum()
     total_values = dataFrame.size
     if nan_count > 0:
