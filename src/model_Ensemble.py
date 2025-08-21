@@ -13,6 +13,22 @@ setup_logging(log_level="INFO", console_output=True, file_output=True)
 logger = get_logger("model_Ensemble")
 
 class MultiHeadCNN(nn.Module):
+    """
+    A multi-head 1D CNN model for joint regression and classification tasks.
+    
+    This model processes input time series using stacked 1D convolutional layers 
+    followed by two separate heads:
+        - A regression head for predicting price.
+        - A classification head for predicting market direction.
+    
+    The architecture uses batch normalization, dropout, and ReLU activations 
+    to stabilize training and reduce overfitting.
+    
+    Args:
+        cfg (DictConfig): Configuration object specifying CNN architecture parameters,
+            including input channels, number of classes, layer sizes, dropout rates, 
+            kernel sizes, paddings, and strides.
+    """
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing CNN model with config: {cfg.cnn}")
         super().__init__()
@@ -96,7 +112,15 @@ class MultiHeadCNN(nn.Module):
         self._initialize_weights()
         
     def _initialize_weights(self):
-        """Proper weight initialization for better convergence"""
+        """
+        Initialize weights of convolutional, linear, and batch norm layers.
+        
+        - Convolutional and non-head linear layers use Kaiming initialization.
+        - Classification head linear layers use Xavier initialization.
+        - BatchNorm layers are initialized to preserve scale and shift.
+        
+        This promotes better convergence during training.
+        """
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -115,6 +139,25 @@ class MultiHeadCNN(nn.Module):
                 nn.init.constant_(m.bias, 0)
     
     def forward(self, x):
+        """
+        Perform the forward pass of the MultiHeadCNN.
+        
+        Applies convolutional layers to extract features, then splits into two heads:
+        one for price regression and another for market direction classification.
+        
+        Residual connections and feature alignment are applied to enhance 
+        directional feature representations.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, time_steps, input_channels).
+        
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+                - price_pred (torch.Tensor): Predicted price, shape (batch_size,).
+                - direction_pred (torch.Tensor): Predicted class logits, shape (batch_size, num_classes).
+                - price_features (torch.Tensor): Features used for price prediction.
+                - direction_features (torch.Tensor): Final features used for classification.
+        """
         logger.debug(f"MultiHeadCNN forward pass with input shape: {x.shape}")
         x = x.transpose(1, 2)
         x = self.cnn(x)
@@ -145,6 +188,19 @@ class MultiHeadCNN(nn.Module):
         return price_pred, direction_pred, price_features, direction_features
 
 class RidgeRegressor(nn.Module):
+    """
+    Ridge regression model implemented using PyTorch.
+    
+    This class supports fitting a linear model with L2 regularization (Ridge)
+    using either Singular Value Decomposition (SVD) or a normal equations fallback.
+    It handles optional intercept fitting and can be used in GPU-accelerated pipelines.
+    
+    Args:
+        cfg (DictConfig): Configuration object containing the following Ridge parameters:
+            - alpha (float): Regularization strength.
+            - fit_intercept (bool, optional): Whether to fit an intercept. Defaults to True.
+            - eps (float, optional): Small value to prevent division by zero. Defaults to 1e-8.
+    """
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing RidgeRegressor with alpha={cfg.Ridge.alpha:.4f}, fit_intercept={cfg.Ridge.get('fit_intercept', True)}")
         super().__init__()
@@ -160,6 +216,21 @@ class RidgeRegressor(nn.Module):
         self.fallback_count = 0  # Track fallback attempts
         
     def fit(self, X, y, rank=None):
+        """
+        Fit the Ridge regression model using input features and target values.
+        
+        Uses SVD for numerically stable fitting, with a fallback to solving 
+        the regularized normal equations if SVD fails. The model learns 
+        weights and optionally an intercept term.
+        
+        Args:
+            X (torch.Tensor): Input feature tensor of shape (batch_size, *).
+            y (torch.Tensor): Target tensor of shape (batch_size,).
+            rank (int, optional): Optional rank truncation for SVD. Useful for low-rank approximation.
+        
+        Raises:
+            RuntimeError: If the fitting process fails due to CUDA or numerical issues.
+        """
         logger.info(f"Fitting RidgeRegressor on data: X shape {X.shape}, y shape {y.shape}")
         
         device = X.device
@@ -187,7 +258,7 @@ class RidgeRegressor(nn.Module):
                 # Log condition number
                 condition_number = torch.max(S) / (torch.min(S) + self.eps)
                 logger.info(f"Matrix condition number: {condition_number:.4f}")
-
+                
                 # Ridge solution using SVD
                 S_reg = S / (S**2 + self.alpha + self.eps)
                 theta = Vt.t() @ (S_reg.unsqueeze(1) * (U.t() @ y.unsqueeze(1))).squeeze(1)
@@ -214,7 +285,7 @@ class RidgeRegressor(nn.Module):
         # Validate coefficients
         if torch.any(torch.abs(theta) > 1e5):
             logger.warning(f"Large coefficients detected: max |theta| = {torch.abs(theta).max()}")
-
+        
         # Split weight and bias
         if self.fit_intercept:
             self.weight.data = theta[:-1].clone().detach()
@@ -228,12 +299,27 @@ class RidgeRegressor(nn.Module):
             y_pred = torch.matmul(XWithIntercept, theta)
             mae = torch.mean(torch.abs(y_pred - y))
             logger.info(f"Training MAE after fitting: {mae:.4f}")
-
+        
         self.is_fitted = True
     
     def forward(self, x):
+        """
+        Perform a forward pass using the fitted Ridge regression model.
+        
+        Predicts outputs using the learned weights (and optional intercept).
+        Input is flattened to 2D if needed.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, *) or (batch_size, features).
+        
+        Returns:
+            torch.Tensor: Predicted values of shape (batch_size,).
+        
+        Raises:
+            RuntimeError: If called before the model has been fitted using `.fit()`.
+        """
         logger.debug(f"RidgeRegressor forward pass with input shape: {x.shape}")
-
+        
         if not self.is_fitted:
             raise RuntimeError("Ridge model must be fitted before forward pass. Call .fit() first.")
         
@@ -243,13 +329,33 @@ class RidgeRegressor(nn.Module):
         
         x = x.to(self.weight.device).float()
         predictions = torch.matmul(x, self.weight)
-
+        
         if self.fit_intercept:
             predictions = predictions + self.bias
         
         return predictions
 
 class LSTMClassifier(nn.Module):
+    """
+    A bidirectional LSTM-based classifier for time series data.
+    
+    This model projects input features, applies a multi-layer bidirectional LSTM, 
+    and feeds the output through a fully connected network to perform classification.
+    
+    Includes:
+        - Input projection to match LSTM dimensionality.
+        - Layer normalization and residual connections.
+        - Xavier initialization for stability.
+        - Final dense layers for class prediction.
+    
+    Args:
+        cfg (DictConfig): Configuration object containing model parameters:
+            - cfg.LSTM.hidden_size (int): Hidden dimension size of the LSTM.
+            - cfg.LSTM.num_layers (int): Number of LSTM layers.
+            - cfg.LSTM.dropout (float): Dropout rate.
+            - cfg.cnn.inputChannels (int): Dimensionality of input features.
+            - cfg.cnn.num_classes (int): Number of output classes.
+    """
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing Improved LSTMClassifier with hidden_size={cfg.LSTM.hidden_size}, num_layers={cfg.LSTM.num_layers}")
         super().__init__()
@@ -286,7 +392,15 @@ class LSTMClassifier(nn.Module):
         self._initialize_weights()
         
     def _initialize_weights(self):
-        """Initialize weights for better convergence"""
+        """
+        Initialize weights of all submodules in the network.
+        
+        - Linear and LSTM weights are initialized using Xavier uniform.
+        - Biases are initialized to zero.
+        - LayerNorm weights initialized to 1.0 and biases to 0.0.
+        
+        Improves training stability and convergence.
+        """
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
@@ -303,6 +417,22 @@ class LSTMClassifier(nn.Module):
                 nn.init.constant_(m.bias, 0.0)
     
     def forward(self, x):
+        """
+        Perform a forward pass through the LSTM classifier.
+        
+        Steps:
+            1. Project input features to LSTM hidden size.
+            2. Run input through a bidirectional LSTM.
+            3. Apply layer normalization and a residual connection.
+            4. Extract the last time step output.
+            5. Feed through a fully connected classifier to get logits.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, input_size).
+        
+        Returns:
+            torch.Tensor: Output class logits of shape (batch_size, num_classes).
+        """
         logger.debug(f"LSTMClassifier forward pass with input shape: {x.shape}")
         # Input shape: (batch, seq_len, input_size)
         batch_size = x.size(0)
@@ -335,39 +465,81 @@ class LSTMClassifier(nn.Module):
 
 class MetaPriceRegressor(nn.Module):
     """
-    Linear regressor over base model outputs (CNN price, Ridge price, direction probs, lstm probs).
-    Acts like learned blending (ridge-like if you add weight_decay in optimizer).
+    A linear regressor that combines outputs from multiple base models.
+    
+    This model acts as a learned ensemble for price prediction, typically
+    blending features such as:
+        - CNN price predictions
+        - Ridge regression outputs
+        - Directional classification probabilities
+        - LSTM-based predictions
+    
+    Can behave like Ridge regression when combined with weight decay in the optimizer.
+    
+    Args:
+        in_dim (int): Dimensionality of the input feature vector.
     """
     def __init__(self, in_dim: int):
         super().__init__()
         self.linear = nn.Linear(in_dim, 1)
     
     def forward(self, z):
+        """
+        Forward pass for the price regressor.
+        
+        Args:
+            z (torch.Tensor): Input tensor of shape (batch_size, in_dim) containing
+                features from base models.
+        
+        Returns:
+            torch.Tensor: Predicted price values of shape (batch_size,).
+        """
         return self.linear(z).squeeze(-1)
 
 class MetaDirectionClassifier(nn.Module):
     """
-    Linear classifier over base outputs (CNN logits/probs, lstm logits/probs, optional prices).
+    A linear classifier that ensembles multiple model outputs for direction prediction.
+    
+    Inputs may include:
+        - CNN logits or probabilities
+        - LSTM logits or probabilities
+        - Price predictions (optional)
+    
+    Args:
+        in_dim (int): Number of input features.
+        num_classes (int): Number of output classes.
     """
     def __init__(self, in_dim: int, num_classes: int):
         super().__init__()
         self.linear = nn.Linear(in_dim, num_classes)
     
     def forward(self, z):
+        """
+        Forward pass for the direction classifier.
+        
+        Args:
+            z (torch.Tensor): Input tensor of shape (batch_size, in_dim).
+        
+        Returns:
+            torch.Tensor: Output logits of shape (batch_size, num_classes).
+        """
         return self.linear(z)
 
 class FocalLoss(nn.Module):
     """
-    Focal loss with proper class balancing and adaptive parameters.
-    Optimized for production with device-agnostic computations and robust input validation.
+    Focal loss with class-balancing using effective number of samples.
+    
+    This loss function reduces the relative loss for well-classified examples, 
+    focusing training on hard examples. It includes robust support for class imbalance
+    through adaptive weighting.
     
     Args:
-        num_classes (int): Number of classes in the classification task.
-        class_counts (torch.Tensor): Tensor of class counts for computing weights.
-        gamma (float): Focusing parameter for focal loss (default: 1.5).
-        beta (float): Beta parameter for effective number of samples (default: 0.9999).
-        reduction (str): Reduction method ('mean', 'sum', or 'none').
-        eps (float): Small epsilon for numerical stability (default: 1e-8).
+        num_classes (int): Number of output classes.
+        class_counts (torch.Tensor, optional): Raw class counts used for computing balancing weights.
+        gamma (float): Focusing parameter (default: 1.5).
+        beta (float): Beta parameter for effective number calculation (default: 0.9999).
+        reduction (str): Reduction method: 'mean', 'sum', or 'none'.
+        eps (float): Small epsilon for numerical stability.
     """
     def __init__(self, num_classes: int, class_counts: torch.Tensor = None, 
                     gamma: float = 1.5, beta: float = 0.9999, 
@@ -381,7 +553,7 @@ class FocalLoss(nn.Module):
             class_counts = torch.ones(num_classes, dtype=torch.float32)
         elif not isinstance(class_counts, torch.Tensor):
             class_counts = torch.tensor(class_counts, dtype=torch.float32)
-
+        
         if len(class_counts) != num_classes:
             raise ValueError(f"class_counts length ({len(class_counts)}) must match num_classes ({num_classes})")
         # If counts are all zeros or negative values sneaked in, fallback to uniform
@@ -391,7 +563,7 @@ class FocalLoss(nn.Module):
             raise ValueError("class_counts must be non-negative")
         if reduction not in ['mean', 'sum', 'none']:
             raise ValueError(f"Invalid reduction: {reduction}. Must be 'mean', 'sum', or 'none'.")
-
+        
         # Calculate effective weights using effective number of samples
         effective_num = 1.0 - torch.pow(beta, class_counts)
         # Avoid divide-by-zero by clamping effective_num
@@ -419,6 +591,9 @@ class FocalLoss(nn.Module):
         
         Returns:
             torch.Tensor: Computed focal loss based on reduction type.
+        
+        Raises:
+        ValueError: If input shapes or target ranges are invalid.
         """
         # Validate inputs
         if inputs.dim() != 2 or inputs.size(1) != self.num_classes:
@@ -442,13 +617,31 @@ class FocalLoss(nn.Module):
 
 class OrthogonalLoss(nn.Module):
     """
-    Enhanced orthogonal loss to reduce feature correlation
+    Encourages orthogonality between feature representations.
+    
+    Designed to reduce correlation between price and directional feature embeddings
+    by penalizing cosine similarity.
+    
+    Args:
+        lambda_ortho (float): Scaling factor for the orthogonality penalty (default: 1.0).
     """
     def __init__(self, lambda_ortho=1.0):
         super().__init__()
         self.lambda_ortho = lambda_ortho
     
     def forward(self, price_features, direction_features):
+        """
+        Compute the orthogonality penalty between two feature vectors.
+        
+        Args:
+            price_features (torch.Tensor): Tensor of shape (batch_size, feature_dim).
+            direction_features (torch.Tensor): Tensor of shape (batch_size, feature_dim).
+        
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                - penalty (torch.Tensor): Scalar loss encouraging orthogonality.
+                - cosine_sim (torch.Tensor): Tensor of cosine similarities per sample.
+        """
         price_norm = F.normalize(price_features, p=2, dim=1, eps=1e-8)
         direction_norm = F.normalize(direction_features, p=2, dim=1, eps=1e-8)
         cosine_sim = torch.sum(price_norm * direction_norm, dim=1)
@@ -457,11 +650,31 @@ class OrthogonalLoss(nn.Module):
 
 class EnsembleModule(L.LightningModule):
     """
-    Multi-headed CNN-Ridge-LSTM Ensemble Lightning Module
-    - CNN provides both price and direction predictions
-    - Ridge complements price predictions
-    - LSTM complements direction predictions
-    - Meta-learners to blend all predictions
+    PyTorch Lightning module for an ensemble model combining CNN, Ridge, and LSTM components.
+    
+    This module supports multi-headed predictions for both price regression and directional classification.
+    It optionally includes meta-learners to blend the base predictions more effectively.
+    
+    Components:
+        - CNN: Predicts both price and direction.
+        - Ridge: Enhances price prediction with a linear model.
+        - LSTM: Enhances direction prediction with a sequential model.
+        - Meta-learners: Combines predictions using learned fusion for both price and direction.
+    
+    Attributes:
+        cfg (DictConfig): Hydra configuration dictionary.
+        cnn (nn.Module): Multi-headed CNN model.
+        ridge (nn.Module): Ridge regressor.
+        lstm (nn.Module): LSTM classifier.
+        use_meta_learning (bool): Whether to use meta-learners.
+        meta_price (nn.Module): Meta-learner for price regression.
+        meta_dir (nn.Module): Meta-learner for direction classification.
+        include_base_losses (bool): Whether to include CNN/Ridge/LSTM base losses.
+        price_criterion (nn.Module): Loss function for price prediction.
+        direction_criterion (nn.Module): Loss function for classification.
+        orthogonal_loss (nn.Module): Loss to enforce orthogonality between feature spaces.
+        ridge_fitted (bool): Whether the Ridge model has been fitted on training data.
+        class_counts (torch.Tensor): Class frequencies for weighted classification.
     """
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing EnsembleModule with config: {cfg.model}")
@@ -504,7 +717,7 @@ class EnsembleModule(L.LightningModule):
         self.orthogonal_loss = OrthogonalLoss(lambda_ortho=cfg.model.orthogonal_lambda)
         
         self.class_counts = None
-
+        
         # Metrics
         self._setup_metrics()
         
@@ -528,7 +741,17 @@ class EnsembleModule(L.LightningModule):
     
     def build_meta_features(self, x, cnn_price, cnn_dir_logits):
         """
-        Build robust meta-features with proper error handling and normalization.
+        Construct meta-features for meta-learners from base model predictions.
+        
+        Args:
+            x (torch.Tensor): Input features.
+            cnn_price (torch.Tensor): Price prediction from CNN.
+            cnn_dir_logits (torch.Tensor): Direction logits from CNN.
+        
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: 
+                - Meta-features for price regression.
+                - Meta-features for direction classification.
         """
         B = cnn_price.shape[0]
         device = cnn_price.device
@@ -596,8 +819,24 @@ class EnsembleModule(L.LightningModule):
         return z_price, z_dir
     
     def forward(self, x):
+        """
+        Forward pass of the ensemble module.
+        
+        Depending on whether meta-learning is enabled, either base predictions are blended
+        or meta-models are used for final outputs.
+        
+        Args:
+            x (torch.Tensor): Input features.
+        
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+                - Final price prediction.
+                - Final direction logits.
+                - Price feature vector.
+                - Direction feature vector.
+        """
         logger.debug(f"EnsembleModule forward pass with input shape: {x.shape}")
-
+        
         cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
         
         if self.use_meta_learning:
@@ -649,6 +888,12 @@ class EnsembleModule(L.LightningModule):
         return final_price, final_direction, price_features, direction_features
     
     def on_train_start(self):
+        """
+        Operations to perform at the beginning of training.
+        
+        - Computes class frequencies for Focal Loss.
+        - Fits the Ridge model on the full training set.
+        """
         logger.info("Setting up training with class balancing...")
         
         train_dataloader = self.trainer.datamodule.train_dataloader()
@@ -698,6 +943,18 @@ class EnsembleModule(L.LightningModule):
             logger.info(f"Ridge fitted on {len(price_y_all)} samples!")
     
     def training_step(self, batch, batch_idx):
+        """
+        Perform a single training step.
+        
+        Computes predictions, losses, and updates metrics.
+        
+        Args:
+            batch (Tuple[torch.Tensor]): A batch containing (x, price_y, direction_y).
+            batch_idx (int): Index of the current batch.
+        
+        Returns:
+            torch.Tensor: Total loss for the batch.
+        """
         logger.debug(f"Training step: batch_idx={batch_idx}")
         
         x, price_y, direction_y = batch
@@ -719,9 +976,9 @@ class EnsembleModule(L.LightningModule):
             base_direction_loss = self.direction_criterion(cnn_direction_logits, direction_y)
             base_losses = (self.price_loss_weight * base_price_loss + 
                          self.direction_loss_weight * base_direction_loss)
-
+        
         orthogonal_penalty, cosine_sim = self.orthogonal_loss(price_features, direction_features)
-
+        
         total_loss = (self.price_loss_weight * price_loss + 
                         self.direction_loss_weight * direction_loss + 
                         base_losses + orthogonal_penalty
@@ -743,10 +1000,20 @@ class EnsembleModule(L.LightningModule):
         self.log('train_cosine_sim', torch.mean(cosine_sim), on_step=True, on_epoch=True)
         if self.include_base_losses:
             self.log('train_base_losses', base_losses, on_step=True, on_epoch=True)
-
+        
         return total_loss
     
     def validation_step(self, batch, batch_idx):
+        """
+        Perform a single validation step.
+        
+        Args:
+            batch (Tuple[torch.Tensor]): A batch containing (x, price_y, direction_y).
+            batch_idx (int): Index of the current batch.
+        
+        Returns:
+            torch.Tensor: Total validation loss.
+        """
         logger.debug(f"Validation step: batch_idx={batch_idx}")
         
         x, price_y, direction_y = batch
@@ -797,6 +1064,11 @@ class EnsembleModule(L.LightningModule):
         return total_loss
     
     def on_train_epoch_end(self):
+        """
+        Computes and logs training metrics at the end of each training epoch.
+        
+        Resets metric objects after logging.
+        """
         logger.info("Training epoch ended. Computing training metrics.")
         
         price_mae = self.mae_train.compute()
@@ -827,6 +1099,11 @@ class EnsembleModule(L.LightningModule):
         self.direction_f1_train.reset()
     
     def on_validation_epoch_end(self):
+        """
+        Computes and logs validation metrics at the end of each validation epoch.
+        
+        Resets metric objects after logging.
+        """
         logger.info("Validation epoch ended. Computing validation metrics.")
         
         price_mae = self.mae_val.compute()
@@ -856,10 +1133,25 @@ class EnsembleModule(L.LightningModule):
         self.direction_f1_val.reset()
     
     def test_step(self, batch, batch_idx):
+        """
+        Run a test step (delegated to the validation step).
+        
+        Args:
+            batch (Tuple[torch.Tensor]): A batch from the test set.
+            batch_idx (int): Index of the current test batch.
+        
+        Returns:
+            torch.Tensor: Total test loss.
+        """
         logger.debug("Test step: batch_idx=%d", batch_idx)
         return self.validation_step(batch, batch_idx)
     
     def on_test_epoch_end(self):
+        """
+        Computes and logs test metrics at the end of the test epoch.
+        
+        Resets metric objects after logging.
+        """
         logger.info("Test epoch ended. Computing test metrics.")
         
         price_mae = self.mae_val.compute()
@@ -890,8 +1182,13 @@ class EnsembleModule(L.LightningModule):
     
     def get_base_predictions(self, x):
         """
-        Get individual predictions from all base models.
-        Useful for analysis and debugging.
+        Retrieve predictions from all base models.
+        
+        Args:
+            x (torch.Tensor): Input features.
+        
+        Returns:
+            dict: Dictionary containing predictions and features from CNN, Ridge, and LSTM.
         """
         with torch.no_grad():
             # CNN predictions
@@ -927,7 +1224,16 @@ class EnsembleModule(L.LightningModule):
     
     def get_meta_predictions(self, x):
         """
-        Get meta-learner predictions.
+        Retrieve predictions from the meta-learners.
+        
+        Args:
+            x (torch.Tensor): Input features.
+        
+        Returns:
+            dict: Dictionary containing meta predictions and corresponding features.
+        
+        Raises:
+            ValueError: If meta-learning is disabled.
         """
         if not self.use_meta_learning:
             raise ValueError("Meta-learning is disabled. Use get_base_predictions() instead.")
@@ -949,6 +1255,11 @@ class EnsembleModule(L.LightningModule):
             }
     
     def save_components(self):
+        """
+        Save the model components (CNN, Ridge, LSTM, and meta-learners if used) to disk.
+        
+        File paths are defined in the configuration.
+        """
         logger.info("Saving model components to disk.")
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent
@@ -985,6 +1296,12 @@ class EnsembleModule(L.LightningModule):
         logger.info(f"LSTM saved to {lstmPath}")
     
     def configure_optimizers(self):
+        """
+        Configure optimizers and learning rate scheduler.
+        
+        Returns:
+            dict: Optimizer and LR scheduler configuration for PyTorch Lightning.
+        """
         logger.info("Configuring optimizers and learning rate scheduler.")
         
         base_params = list(self.cnn.parameters()) + list(self.lstm.parameters())
