@@ -8,6 +8,32 @@ from ray import logger
 from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
+    """
+    Perform feature engineering on financial time series data for NVDA stock.
+    
+    This function creates a comprehensive set of technical, statistical, and
+    sentiment-based features using the input price and volume data. Features
+    include candlestick patterns, trend indicators, volatility measures, volume
+    metrics, sector strength proxies, and more. It also handles data cleaning,
+    target label generation, and exports the processed DataFrame to a CSV file.
+    
+    Args:
+        dataFrame (pd.DataFrame): The raw input DataFrame containing columns such as
+            'Open', 'High', 'Low', 'Close', 'Volume', and various macro indicators.
+        cfg (DictConfig): Hydra configuration object with data processing settings.
+        save_data_path (Path or str): File path to save the processed DataFrame as CSV.
+    
+    Returns:
+        pd.DataFrame: The processed DataFrame with engineered features and target labels.
+    
+    Raises:
+        ValueError: If there is insufficient data for computing long-term indicators
+            such as the 200-day SMA.
+    
+    Notes:
+        - The target label 'Direction_Target' is a 3-class label indicating
+            bullish (2), bearish (0), or sideways (1) movement, based on adaptive thresholds.
+    """
     logger = log_function_start("feature_engineering",dataFrame=dataFrame, save_data_path=save_data_path)
     logger.info("Starting feature engineering...")
     
@@ -377,6 +403,21 @@ def feature_engineering(dataFrame, cfg: DictConfig, save_data_path):
 
 @hydra.main(version_base=None, config_path="../configs", config_name="feature_engineering")
 def main(cfg: DictConfig):
+    """
+    Entry point for the feature engineering pipeline.
+    
+    This function sets up logging, loads the raw data from the specified path,
+    and triggers the feature engineering process. Paths are resolved relative
+    to the repository root to ensure portability.
+    
+    Args:
+        cfg (DictConfig): Hydra configuration object containing paths and parameters
+            for data loading and preprocessing.
+    
+    Raises:
+        Exception: Propagates any exception raised during the data loading or
+        feature engineering process.
+    """
     try:
         setup_logging(log_level="INFO", console_output=True, file_output=True)
         logger = get_logger("main")

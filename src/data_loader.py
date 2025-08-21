@@ -7,6 +7,29 @@ import sys
 from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
 
 def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save_name):
+    """
+    Load and preprocess financial data from WRDS for a given security and time period.
+    
+    This function connects to the WRDS database using provided credentials, retrieves
+    data using a parameterized SQL query, applies data cleaning and intelligent imputation
+    strategies to ensure complete coverage, and saves the resulting DataFrame to a CSV file.
+    
+    Args:
+        cfg (DictConfig): Configuration object with WRDS credentials and SQL query path.
+        ticker (str): Ticker symbol of the target company.
+        permno (str or int): CRSP PERMNO identifier for the security.
+        gvkey (str or int): Compustat GVKEY identifier for the company.
+        start_date (str): Start date for data retrieval in 'YYYY-MM-DD' format.
+        end_date (str): End date for data retrieval in 'YYYY-MM-DD' format.
+        save_name (str): Output file path for saving the processed data as CSV.
+    
+    Returns:
+        pd.DataFrame: A cleaned and imputed DataFrame indexed by date, containing
+        market and fundamental data.
+    
+    Raises:
+        ValueError: If no data is retrieved for the given parameters.
+    """
     logger = log_function_start("load_data", 
                             ticker=ticker, permno=permno, gvkey=gvkey,
                             start_date=start_date, end_date=end_date, save_name=save_name)
@@ -134,6 +157,17 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
 
 @hydra.main(version_base=None, config_path="../configs", config_name="data_loader")
 def main(cfg: DictConfig):
+    """
+    Entry point for the NVDA Stock Predictor data loading pipeline.
+    
+    Sets up logging, logs relevant configuration details, and initiates the
+    data loading and preprocessing process via `load_data`.
+    
+    Args:
+        cfg (DictConfig): Configuration object containing all required
+        parameters for data loading, including identifiers, date range, and
+        output paths.
+    """
     try:
         setup_logging(log_level="INFO", console_output=True, file_output=True)
         logger = get_logger("main")
