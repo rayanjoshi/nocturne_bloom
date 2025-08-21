@@ -1,14 +1,14 @@
 model:
   target_sequence_length: 1  # Predicting the next closing price
-  huber_delta: 4.628469453805564  # Delta for Huber loss, can be adjusted based on the dataset
+  huber_delta: 2.090278310125737  # Delta for Huber loss, can be adjusted based on the dataset
   # non-normalized weighted averaging of CNN and ElasticNet regression outputs #
   
-  price_loss_weight: 0.13260350922073164
-  direction_loss_weight: 0.6463385219193244
-  orthogonal_lambda: 1.807206352597851e-06
-  focal_alpha: 0.6378924453931542 # Alpha parameter for Focal Loss, can be adjusted based on class imbalance
-  focal_gamma: 1.7566209864421936  # Gamma parameter for Focal Loss, can be adjusted based on class imbalance
-  focal_beta: 0.999  # Beta parameter for Focal Loss, can be adjusted based on class imbalance
+  price_loss_weight: 0.6576468910714767
+  direction_loss_weight: 1.0643901466838606
+  orthogonal_lambda: 88.71267542479445
+  focal_alpha: 0.6219565211521811 # Alpha parameter for Focal Loss, can be adjusted based on class imbalance
+  focal_gamma: 4.622938411900545  # Gamma parameter for Focal Loss, can be adjusted based on class imbalance
+  focal_beta: 0.9488585788984044  # Beta parameter for Focal Loss, can be adjusted based on class imbalance
   # Direction threshold is set during feature engineering.
 
   use_meta_learning: true  # Enable/disable meta-learning
@@ -16,10 +16,10 @@ model:
   meta_price_loss_weight:  0.5017565395318231
   meta_direction_loss_weight: 1.224786001971306
 
-  price_cnn_weight: 0.2236168779134081
-  direction_cnn_weight: 0.15279678913346806
-  lstm_weight: 1.9819634961106458
-  ridge_weight: 0.25844160291534646
+  price_cnn_weight: 0.8730896342605401
+  direction_cnn_weight: 0.8386952208297653
+  lstm_weight: 1.5955315985432164
+  ridge_weight: 0.5635576137333222
 
   cnnPath: models/cnn_model.pth
   lstmPath: models/lstm_model.pth
@@ -29,34 +29,34 @@ model:
 
 cnn:
   inputChannels: 119  # Number of features (RSI, MACD, etc.)
-  cnnChannels: [16, 48, 224]  # Reduced capacity to prevent overfitting
-  kernelSize: [1, 4, 5]
-  poolSize: [4, 1, 4]  # Pooling after each CNN layer
+  cnnChannels: [32, 16, 24]  # Reduced capacity to prevent overfitting
+  kernelSize: [2, 1, 2]
+  poolSize: [5, 3, 5]  # Pooling after each CNN layer
   poolPadding: [0, 0, 0]
-  padding: [1, 2, 3]  # kernel_size // 2 for each dimension
-  stride: 1
-  dropout: [0.09287162569741389, 0.21869028382558525]
+  padding: [3, 0, 0]  # kernel_size // 2 for each dimension
+  stride: 2
+  dropout: [0.052234011633735145, 0.32545752913604054]
   outputSize: 1
   num_classes: 3
 
 Ridge:
-  alpha: 26.49812478753092  # Regularization strength for Ridge regression, can be adjusted based on the dataset
+  alpha: 14.456419059812365  # Regularization strength for Ridge regression, can be adjusted based on the dataset
   fit_intercept: True
-  eps: 9.246073409858e-10
+  eps: 3.0954285028934425e-09
 
 LSTM:
-  hidden_size: 128
-  num_layers: 2
-  dropout: 0.3319689985608108
+  hidden_size: 256
+  num_layers: 1
+  dropout: 0.4746468231597993
 
 optimiser:
   name: 'adam'
-  base_lr: 1.1184368921509642e-05
-  meta_lr: 0.0025091223135881133
-  weightDecay: 8.50024502354052e-06  # L2 regularization term 
-  eps: 5.458308799623664e-05
+  base_lr: 6.519727352999722e-05
+  meta_lr: 0.00541949872619301
+  weightDecay: 1.2018092470807248e-07  # L2 regularization term 
+  eps: 5.7730572441441915e-11
   amsgrad: False  # Whether to use AMSGrad variant of Adam
   schedulerMode: 'min'
-  schedulerFactor: 0.1521798198052559
-  schedulerPatience: 10
-  schedulerMinLR: 3.597273661483213e-10
+  schedulerFactor: 0.2227722192439267
+  schedulerPatience: 7
+  schedulerMinLR: 1.3172742068637252e-05
