@@ -253,7 +253,7 @@ class StockDataset(Dataset):
         np.save(x_save_path, x_scaled)
         np.save(price_y_save_path, price_y_scaled)
         np.save(direction_y_save_path, direction_y_final)
-        logger.info(f"Scaled X saved to: {x_save_path}.npy")
+        logger.info(f"Scaled x saved to: {x_save_path}.npy")
         logger.info(f"Scaled price_y saved to: {price_y_save_path}.npy")
         logger.info(f"Scaled direction_y saved to: {direction_y_save_path}.npy")
         log_function_end("StockDataset.generate_windows", success=True)
@@ -314,10 +314,10 @@ class StockDataset(Dataset):
         torch.save(direction_y_tensor, direction_y_save_path)
 
         logger.info("Tensors saved to:")
-        logger.info(f"  X: {x_save_path.absolute()}")
+        logger.info(f"  x: {x_save_path.absolute()}")
         logger.info(f"  Price Y: {price_y_save_path.absolute()}")
         logger.info(f"  Direction Y: {direction_y_save_path.absolute()}")
-        logger.info(f"X tensor shape: {x_tensor.shape}")
+        logger.info(f"x tensor shape: {x_tensor.shape}")
         logger.info(f"Price Y tensor shape: {price_y_tensor.shape}")
         logger.info(f"Direction Y tensor shape: {direction_y_tensor.shape}")
         log_function_end("StockDataset.save_tensors", success=True)
@@ -365,7 +365,7 @@ class StockDataModule(L.LightningDataModule):
         direction_y_path = Path(repo_root / self.cfg.data_module.direction_y_save_path).resolve()
 
         logger.info("Loading tensors from:")
-        logger.info(f"  X: {x_path.absolute()}")
+        logger.info(f"  x: {x_path.absolute()}")
         logger.info(f"  Price Y: {price_y_path.absolute()}")
         logger.info(f"  Direction Y: {direction_y_path.absolute()}")
 
