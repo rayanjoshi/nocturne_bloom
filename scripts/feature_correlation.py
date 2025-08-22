@@ -1,19 +1,38 @@
+"""Module for visualizing feature correlations in preprocessed NVIDIA stock data.
+
+This module provides functionality to create a correlation heatmap and identify
+strong correlations between features in a dataset. It uses a preprocessed CSV file
+containing NVIDIA stock data to generate a heatmap visualization and print the top
+correlations with a target variable and between feature pairs.
+
+Dependencies:
+    matplotlib.pyplot: For creating the heatmap visualization
+    pandas: For data manipulation and correlation calculations
+    seaborn: For enhanced visualization of the correlation matrix
+
+The module assumes the input CSV file has a datetime index and contains relevant
+financial features for correlation analysis.
+"""
+from pathlib import Path
 from matplotlib import pyplot as plt
 import pandas as pd
-import scipy
-import numpy as np
 import seaborn as sns
 
-df = pd.read_csv('../data/preprocessing/nvda_processed_data.csv', index_col=0, parse_dates=True)
+# Load preprocessed features
+script_dir = Path(__file__).parent
+repo_root = script_dir.parent
+# Automatically select the correct file with Target column
+preprocessed_path = repo_root / 'data/preprocessing/nvda_processed_data.csv'
+df = pd.read_csv(preprocessed_path, header=0, index_col=0, parse_dates=True)
 corr = df.corr()
 
 # Create a much larger figure to accommodate all features
 plt.figure(dpi=100, figsize=(20, 16))
 
 # Use smaller font size and remove annotations for better readability
-sns.heatmap(corr, 
-    annot=False,  # Remove numbers to reduce clutter
-    fmt=".2f", 
+sns.heatmap(corr,
+    annot=False, # Remove numbers to reduce clutter
+    fmt=".2f",
     cmap='RdBu_r',  # Better color scheme
     center=0,  # Center colormap at 0
     square=True,  # Make cells square
@@ -28,7 +47,11 @@ plt.show()
 # Alternative: Show only the strongest correlations
 print("\n=== STRONGEST CORRELATIONS ===")
 # Get correlations with target variable (assuming 'close' or similar)
-target_cols = [col for col in corr.columns if 'close' in col.lower() or 'Price_Target' in col.lower()]
+target_cols = [
+    col
+    for col in corr.columns
+    if 'close' in col.lower() or 'price_target' in col.lower()
+]
 
 if target_cols:
     target_col = target_cols[0]
@@ -39,15 +62,15 @@ if target_cols:
 # Show pairs with highest absolute correlation (excluding diagonal)
 print("\n=== HIGHEST FEATURE-TO-FEATURE CORRELATIONS ===")
 corr_pairs = []
-for i in range(len(corr.columns)):
-    for j in range(i+1, len(corr.columns)):
+for i, feature1 in enumerate(corr.columns):
+    for j, feature2 in enumerate(corr.columns[i+1:], start=i+1):
         corr_pairs.append({
-            'feature1': corr.columns[i],
-            'feature2': corr.columns[j],
+            'feature1': feature1,
+            'feature2': feature2,
             'correlation': corr.iloc[i, j]
         })
 
-corr_df = pd.df(corr_pairs)
+corr_df = pd.DataFrame(corr_pairs)
 corr_df['abs_correlation'] = corr_df['correlation'].abs()
 top_correlations = corr_df.nlargest(15, 'abs_correlation')
 print("\nTop 15 strongest feature pairs:")
