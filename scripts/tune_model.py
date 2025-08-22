@@ -38,7 +38,7 @@ except ImportError as e:
     print("🔧 Falling back to basic search algorithm")
     OPTUNA_AVAILABLE = False
 
-from src.model_Ensemble import EnsembleModule
+from src.model_ensemble import EnsembleModule
 from src.data_module import StockDataModule
 from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
 

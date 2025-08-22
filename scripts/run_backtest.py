@@ -19,7 +19,7 @@ import quantstats as qs
 
 from src.data_loader import load_data
 from src.feature_engineering import feature_engineering
-from src.model_Ensemble import EnsembleModule
+from src.model_ensemble import EnsembleModule
 from scripts.logging_config import get_logger, setup_logging
 
 class DataProcessor:

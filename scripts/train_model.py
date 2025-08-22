@@ -27,7 +27,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig
 
-from src.model_Ensemble import EnsembleModule
+from src.model_ensemble import EnsembleModule
 from src.data_module import StockDataModule
 from scripts.logging_config import get_logger, setup_logging
 

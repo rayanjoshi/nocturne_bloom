@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 import torch
 from captum.attr import Saliency
 from omegaconf import OmegaConf
-from src.model_Ensemble import EnsembleModule
+from src.model_ensemble import EnsembleModule
 
 # Load preprocessed features
 script_dir = Path(__file__).parent
