@@ -1,5 +1,5 @@
 defaults:
-  - model_Ensemble
+  - model_ensemble
 
 data_loader:
   TICKER: "NVDA"

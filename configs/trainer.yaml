@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - model_Ensemble
+  - model_ensemble
   - data_module
 
 trainer:

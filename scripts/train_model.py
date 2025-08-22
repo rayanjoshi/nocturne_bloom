@@ -14,7 +14,7 @@ Dependencies:
     - torch: For PyTorch operations and random seed setting.
     - lightning.pytorch: For training, checkpointing, and early stopping.
     - omegaconf: For handling configuration as DictConfig.
-    - src.model_Ensemble: Custom module containing the EnsembleModule class.
+    - src.model_ensemble: Custom module containing the EnsembleModule class.
     - src.data_module: Custom module containing the StockDataModule class.
     - scripts.logging_config: Custom module for logging utilities.
 """

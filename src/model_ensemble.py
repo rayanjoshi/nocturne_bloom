@@ -47,7 +47,7 @@ from omegaconf import DictConfig
 from scripts.logging_config import get_logger, setup_logging
 
 setup_logging(log_level="INFO", console_output=True, file_output=True)
-logger = get_logger("model_Ensemble")
+logger = get_logger("model_ensemble")
 
 class MultiHeadCNN(nn.Module):
     """

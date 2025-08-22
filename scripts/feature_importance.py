@@ -15,7 +15,7 @@ Dependencies:
     - torch: For PyTorch-based CNN operations.
     - captum.attr.Saliency: For computing saliency maps.
     - omegaconf: For configuration file handling.
-    - src.model_Ensemble: Custom module containing the EnsembleModule class.
+    - src.model_ensemble: Custom module containing the EnsembleModule class.
 
 The module loads preprocessed data, fits a Ridge Regression model, computes SHAP values,
 and generates saliency maps for the CNN component of an ensemble model. Results are
@@ -98,9 +98,9 @@ plt.show()
 
 
 
-# --- Saliency Maps for CNN from model_Ensemble.py ---
+# --- Saliency Maps for CNN from model_ensemble.py ---
 # Load config
-config_path = repo_root / 'configs/model_Ensemble.yaml'
+config_path = repo_root / 'configs/model_ensemble.yaml'
 cfg = OmegaConf.load(str(config_path))
 
 # Instantiate ensemble and load CNN weights
