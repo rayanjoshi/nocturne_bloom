@@ -280,13 +280,13 @@ class RidgeRegressor(nn.Module):
     def __init__(self, cfg: DictConfig):
         logger.info(
             "Initializing RidgeRegressor with alpha=%0.4f, fit_intercept=%s",
-            cfg.Ridge.alpha,
-            cfg.Ridge.get("fit_intercept", True),
+            cfg.ridge.alpha,
+            cfg.ridge.get("fit_intercept", True),
         )
         super().__init__()
-        self.alpha = cfg.Ridge.alpha
-        self.fit_intercept = cfg.Ridge.get('fit_intercept', True)
-        self.eps = cfg.Ridge.get('eps', 1e-8)
+        self.alpha = cfg.ridge.alpha
+        self.fit_intercept = cfg.ridge.get('fit_intercept', True)
+        self.eps = cfg.ridge.get('eps', 1e-8)
 
         # Ridge parameters (will be set during fit)
         self.register_buffer('weight', torch.tensor(0.0, requires_grad=False))
@@ -444,24 +444,24 @@ class LSTMClassifier(nn.Module):
     
     Args:
         cfg (DictConfig): Configuration object containing model parameters:
-            - cfg.LSTM.hidden_size (int): Hidden dimension size of the LSTM.
-            - cfg.LSTM.num_layers (int): Number of LSTM layers.
-            - cfg.LSTM.dropout (float): Dropout rate.
+            - cfg.lstm.hidden_size (int): Hidden dimension size of the LSTM.
+            - cfg.lstm.num_layers (int): Number of LSTM layers.
+            - cfg.lstm.dropout (float): Dropout rate.
             - cfg.cnn.inputChannels (int): Dimensionality of input features.
             - cfg.cnn.num_classes (int): Number of output classes.
     """
     def __init__(self, cfg: DictConfig):
         logger.info(
             "Initializing Improved LSTMClassifier with hidden_size=%s, num_layers=%s",
-            cfg.LSTM.hidden_size,
-            cfg.LSTM.num_layers,
+            cfg.lstm.hidden_size,
+            cfg.lstm.num_layers,
         )
         super().__init__()
         self.input_size = cfg.cnn.inputChannels
-        self.hidden_size = cfg.LSTM.hidden_size
-        self.num_layers = cfg.LSTM.num_layers
+        self.hidden_size = cfg.lstm.hidden_size
+        self.num_layers = cfg.lstm.num_layers
         self.num_classes = cfg.cnn.num_classes
-        self.dropout = cfg.LSTM.dropout
+        self.dropout = cfg.lstm.dropout
 
         # Input projection to align CNN features
         self.input_projection = nn.Linear(self.input_size, self.hidden_size)
@@ -1423,9 +1423,9 @@ class EnsembleModule(L.LightningModule):
         repo_root = script_dir.parent
 
         # Define paths
-        cnn_path = Path(repo_root / self.cfg.model.cnnPath).resolve()
-        lstm_path = Path(repo_root / self.cfg.model.lstmPath).resolve()
-        ridge_path = Path(repo_root / self.cfg.model.ridgePath).resolve()
+        cnn_path = Path(repo_root / self.cfg.model.cnn_path).resolve()
+        lstm_path = Path(repo_root / self.cfg.model.lstm_path).resolve()
+        ridge_path = Path(repo_root / self.cfg.model.ridge_path).resolve()
 
         # Create directories
         for path in [cnn_path, lstm_path, ridge_path]:

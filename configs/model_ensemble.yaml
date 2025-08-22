@@ -21,9 +21,9 @@ model:
   lstm_weight: 1.5955315985432164
   ridge_weight: 0.5635576137333222
 
-  cnnPath: models/cnn_model.pth
-  lstmPath: models/lstm_model.pth
-  ridgePath: models/ridge_model.pth
+  cnn_path: models/cnn_model.pth
+  lstm_path: models/lstm_model.pth
+  ridge_path: models/ridge_model.pth
   meta_price_path: models/meta_price_model.pth
   meta_direction_path: models/meta_direction_model.pth
 
@@ -39,12 +39,12 @@ cnn:
   outputSize: 1
   num_classes: 3
 
-Ridge:
+ridge:
   alpha: 14.456419059812365  # Regularization strength for Ridge regression, can be adjusted based on the dataset
   fit_intercept: True
   eps: 3.0954285028934425e-09
 
-LSTM:
+lstm:
   hidden_size: 256
   num_layers: 1
   dropout: 0.4746468231597993
