@@ -239,11 +239,11 @@ class MultiHeadCNN(nn.Module):
 
         # Add pooled CNN activations to learned direction features.
         # Project pooled activations to match direction_features_raw dim when necessary.
-        pooled = F.adaptive_avg_pool1d(x.unsqueeze(-1), 1).squeeze(-1)
+        pooled = F.adaptive_avg_pool1d(x.unsqueeze(-1), 1).squeeze(-1)  # pylint: disable=not-callable
         if pooled.size(1) != direction_features_raw.size(1):
-            pooled = F.linear(pooled,
-                                torch.eye(direction_features_raw.size(1), pooled.size(1),
-                                        device=pooled.device, dtype=pooled.dtype))
+            pooled = F.linear(pooled,  # pylint: disable=not-callable
+                        torch.eye(direction_features_raw.size(1), pooled.size(1),
+                        device=pooled.device, dtype=pooled.dtype))
 
         direction_features = direction_features_raw + pooled
 
@@ -256,7 +256,7 @@ class MultiHeadCNN(nn.Module):
                 device=direction_features.device,
                 dtype=direction_features.dtype,
             )
-            direction_features = F.linear(direction_features, eye)
+            direction_features = F.linear(direction_features, eye)  # pylint: disable=not-callable
 
         price_pred = self.pricehead(price_features).squeeze(-1)
         direction_pred = self.directionhead(direction_features_raw)
@@ -331,7 +331,7 @@ class RidgeRegressor(nn.Module):
 
         try:
             with torch.cuda.amp.autocast():
-                u_matrix, singular_values, v_transpose = torch.linalg.svd(
+                u_matrix, singular_values, v_transpose = torch.linalg.svd(   # pylint: disable=not-callable
                     x_with_intercept, full_matrices=False
                 )
                 if rank is not None:
@@ -371,10 +371,10 @@ class RidgeRegressor(nn.Module):
             x_ty = torch.mv(x_with_intercept.t(), y)
 
             try:
-                theta = torch.linalg.solve(xtx_reg, x_ty)
+                theta = torch.linalg.solve(xtx_reg, x_ty)  # pylint: disable=not-callable
             except RuntimeError:
                 logger.warning("Using pseudo-inverse due to singular matrix")
-                theta = torch.linalg.pinv(xtx_reg) @ x_ty
+                theta = torch.linalg.pinv(xtx_reg) @ x_ty  # pylint: disable=not-callable
 
         # Validate coefficients
         if torch.any(torch.abs(theta) > 1e5):
@@ -555,7 +555,7 @@ class LSTMClassifier(nn.Module):
             device=x.device,
             dtype=x.dtype
         )
-        residual = F.linear(x, identity)
+        residual = F.linear(x, identity)  # pylint: disable=not-callable
         out = out + residual  # (batch, seq_len, hidden_size * 2)
 
         # Take the last time step
