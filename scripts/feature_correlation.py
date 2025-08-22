@@ -4,8 +4,8 @@ import scipy
 import numpy as np
 import seaborn as sns
 
-dataFrame = pd.read_csv('../data/preprocessing/nvda_processed_data.csv', index_col=0, parse_dates=True)
-corr = dataFrame.corr()
+df = pd.read_csv('../data/preprocessing/nvda_processed_data.csv', index_col=0, parse_dates=True)
+corr = df.corr()
 
 # Create a much larger figure to accommodate all features
 plt.figure(dpi=100, figsize=(20, 16))
@@ -47,7 +47,7 @@ for i in range(len(corr.columns)):
             'correlation': corr.iloc[i, j]
         })
 
-corr_df = pd.DataFrame(corr_pairs)
+corr_df = pd.df(corr_pairs)
 corr_df['abs_correlation'] = corr_df['correlation'].abs()
 top_correlations = corr_df.nlargest(15, 'abs_correlation')
 print("\nTop 15 strongest feature pairs:")

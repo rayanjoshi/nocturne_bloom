@@ -39,24 +39,24 @@ class DataProcessor:
         repo_root = script_dir.parent  # /path/to/repo/
         raw_data_path = (repo_root / Path(self.cfg.data_loader.raw_data_path)).resolve()
         save_data_path = (repo_root / Path(self.cfg.features.preprocessing_data_path)).resolve()
-        dataFrame = pd.read_csv(
+        df = pd.read_csv(
             raw_data_path, 
             header=0, 
             index_col=0, 
             parse_dates=True
         )
-        return feature_engineering(dataFrame, self.cfg, save_data_path)
+        return feature_engineering(df, self.cfg, save_data_path)
     
-    def data_module(self, dataFrame):
+    def data_module(self, df):
         self.logger.info(f"Converting features to tensors for {self.cfg.data_loader.TICKER}")
         window_size = self.cfg.data_module.window_size
         target_cols = self.cfg.data_module.target_cols
 
-        features = dataFrame.drop(columns=target_cols)
-        target = dataFrame["Price_Target"]
+        features = df.drop(columns=target_cols)
+        target = df["Price_Target"]
 
         x, y = [], []
-        for i in range(window_size, len(dataFrame)):
+        for i in range(window_size, len(df)):
             x.append(features.iloc[i-window_size:i].values)  # past window_size days features
             y.append(target.iloc[i])                         # target is the value at day i
 
@@ -152,40 +152,40 @@ class MakePredictions:
         target_scaler = joblib.load(scalerPath)
         predictions = np.array(predictions).reshape(-1, 1)
         predictions = target_scaler.inverse_transform(predictions).flatten()
-        dataFramePredictions = pd.DataFrame(predictions, columns=['Predicted'])
+        dfPredictions = pd.df(predictions, columns=['Predicted'])
 
         evaluate_data_path = (repo_root / Path(self.cfg.features.preprocessing_data_path)).resolve()
         # load preprocessed data and align to predictions
         df_eval = pd.read_csv(evaluate_data_path, header=0, index_col=0, parse_dates=True)
         dates = df_eval.index[self.cfg.data_module.window_size:]
-        dataFramePredictions.insert(0, 'Time', dates)
+        dfPredictions.insert(0, 'Time', dates)
         self.logger.debug(f"Inserted Time column with {len(dates)} entries.")
 
         close_values = df_eval['Close'].values[self.cfg.data_module.window_size:]
         self.logger.debug(f"Loaded Close values, shape: {close_values.shape}")
 
-        dataFramePredictions['Predicted'] = dataFramePredictions['Predicted'].round(3)
+        dfPredictions['Predicted'] = dfPredictions['Predicted'].round(3)
         close_values = np.round(close_values, 3)
-        dataFramePredictions.insert(2, 'Close', close_values)
+        dfPredictions.insert(2, 'Close', close_values)
         self.logger.debug("Inserted Close column and rounded Predicted/Close values.")
 
-        error = np.abs(dataFramePredictions['Predicted'] - dataFramePredictions['Close'])
-        dataFramePredictions.insert(3, 'Error', error.round(3))
+        error = np.abs(dfPredictions['Predicted'] - dfPredictions['Close'])
+        dfPredictions.insert(3, 'Error', error.round(3))
         self.logger.debug("Inserted Error column.")
 
         # Calculate direction: 1 if next value > current, -1 if next < current, 0 if equal
-        pred_diff = np.diff(dataFramePredictions['Predicted'])
-        close_diff = np.diff(dataFramePredictions['Close'])
+        pred_diff = np.diff(dfPredictions['Predicted'])
+        close_diff = np.diff(dfPredictions['Close'])
         direction = np.where((pred_diff > 0) == (close_diff > 0), 'yes', 'no')
         # Pad with NaN for first row to align length
         direction = np.insert(direction, 0, np.nan)
-        dataFramePredictions.insert(4, 'Direction_Match', direction)
+        dfPredictions.insert(4, 'Direction_Match', direction)
         self.logger.debug("Inserted Direction_Match column.")
 
         save_path = (repo_root / Path(self.cfg.backtest.predictions_save_path)).resolve()
         self.logger.debug(f"Predictions will be saved to {save_path}")
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        dataFramePredictions.to_csv(save_path, index=False)
+        dfPredictions.to_csv(save_path, index=False)
         self.logger.info(f"Saved predictions with time column to {save_path}")
 
 
@@ -206,9 +206,9 @@ class TradingSimulation:
         cerebro = bt.Cerebro(cheat_on_open=True)
         cerebro.addstrategy(StrategySimulation, predictions=self.predictions, close_prices=self.close_prices, dates=self.dates)
 
-        # For Backtrader, create OHLCV DataFrame
+        # For Backtrader, create OHLCV df
         # Use Close from CSV, fill OHLC with Close, Volume=0
-        df = pd.DataFrame({
+        df = pd.df({
             'Open': self.close_prices,
             'High': self.close_prices,
             'Low': self.close_prices,
@@ -347,8 +347,8 @@ def main(cfg: DictConfig):
         logger = get_logger("main")
         data_processor = DataProcessor(cfg)
         data_processor.load_data()
-        dataFrame = data_processor.engineer_features()
-        data_processor.data_module(dataFrame)
+        df = data_processor.engineer_features()
+        data_processor.data_module(df)
         make_predictions = MakePredictions(cfg)
 
         predictions = make_predictions.load_model()
