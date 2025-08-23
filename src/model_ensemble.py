@@ -565,26 +565,6 @@ class MetaPriceRegressor(nn.Module):
         """
         return self.linear(z)
 
-class MetaDirectionClassifier(nn.Module):
-    """
-    A linear classifier that ensembles multiple model outputs for direction prediction.
-    """
-    def __init__(self, in_dim: int, num_classes: int):
-        super().__init__()
-        self.linear = nn.Linear(in_dim, num_classes)
-
-    def forward(self, z):
-        """
-        Forward pass for the direction classifier.
-        
-        Args:
-            z (torch.Tensor): Input tensor of shape (batch_size, in_dim).
-        
-        Returns:
-            torch.Tensor: Output logits of shape (batch_size, num_classes).
-        """
-        return self.linear(z)
-
 class FocalLoss(nn.Module):
     """
     Focal loss with class-balancing using effective number of samples.
@@ -866,15 +846,10 @@ class EnsembleModule(L.LightningModule):
         # Meta-learning setup
         self.use_meta_learning = cfg.model.use_meta_learning
         if self.use_meta_learning:
-            meta_price_dim = 5
-            meta_dir_dim = 2 * self.num_classes + 6
+            meta_price_dim = 9
             self.meta_price = MetaPriceRegressor(
                 in_dim=meta_price_dim,
                 output_seq_len=self.cfg.cnn.output_seq_len,
-            )
-            self.meta_dir = MetaDirectionClassifier(
-                in_dim=meta_dir_dim,
-                num_classes=self.num_classes,
             )
 
         # Configuration
@@ -930,9 +905,7 @@ class EnsembleModule(L.LightningModule):
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
-            - Meta-features for price regression, shape (batch_size, 5).
-            - Meta-features for direction classification, shape
-              (batch_size, 2 * num_classes + 6).
+            - Meta-features for price regression, shape (batch_size, 9).
         """
         batch_size = cnn_price.shape[0]
         device = cnn_price.device
@@ -968,6 +941,7 @@ class EnsembleModule(L.LightningModule):
             cnn_price = cnn_price.squeeze(-1)
 
         dir_entropy = -torch.sum(cnn_dir_probs * torch.log(cnn_dir_probs + 1e-10), dim=1)
+
         price_diff = torch.abs(cnn_price - ridge_price)
         price_mean = (cnn_price + ridge_price) / 2
         price_disagreement = price_diff / (torch.abs(price_mean) + 1e-6)
@@ -976,29 +950,27 @@ class EnsembleModule(L.LightningModule):
         ratio = (cnn_dir_probs + eps) / (lstm_probs + eps)
         dir_kl_div = torch.sum(cnn_dir_probs * torch.log(ratio), dim=1)
 
-        cnn_confidence = torch.max(cnn_dir_probs, dim=1)[0]
-        lstm_confidence = torch.max(lstm_probs, dim=1)[0]
+        direction_confidence = torch.max(cnn_dir_probs, dim=1)[0]
+
+        direction_signal = direction_confidence - 0.5
+        weighted_direction_signal = direction_signal * direction_confidence
+
+        cosine_similarity = F.cosine_similarity(cnn_dir_probs, lstm_probs, dim=1)  # pylint: disable=not-callable
+
+        price_direction_confidence = direction_confidence * torch.abs(cnn_price)
 
         z_price = torch.stack([
             cnn_price.squeeze(-1) if cnn_price.dim() > 1 else cnn_price,
             ridge_price.squeeze(-1) if ridge_price.dim() > 1 else ridge_price,
             dir_entropy,
             price_disagreement,
-            cnn_confidence
-        ], dim=1)  # [batch_size, 5]
-
-        z_dir = torch.cat([
-            (cnn_price.squeeze(-1) if cnn_price.dim() > 1 else cnn_price).unsqueeze(1),
-            (ridge_price.squeeze(-1) if ridge_price.dim() > 1 else ridge_price).unsqueeze(1),
-            dir_entropy.unsqueeze(1),
-            dir_kl_div.unsqueeze(1),
-            cnn_confidence.unsqueeze(1),
-            lstm_confidence.unsqueeze(1),
-            cnn_dir_probs,
-            lstm_probs
-        ], dim=1)  # [batch_size, 2*num_classes + 6]
-
-        return z_price, z_dir
+            dir_kl_div,
+            direction_confidence,
+            weighted_direction_signal,
+            cosine_similarity,
+            price_direction_confidence,
+        ], dim=1)
+        return z_price
 
     def forward(self, *args, **kwargs):
         """
@@ -1011,11 +983,7 @@ class EnsembleModule(L.LightningModule):
             x (torch.Tensor): Input features.
         
         Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-                - Final price prediction.
-                - Final direction logits.
-                - Price feature vector.
-                - Direction feature vector.
+            Tuple[torch.Tensor]: Final price prediction.
         """
         x = args[0]
         logger.debug(f"EnsembleModule forward pass with input shape: {x.shape}")
@@ -1023,15 +991,14 @@ class EnsembleModule(L.LightningModule):
         cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
 
         if self.use_meta_learning:
-            z_price, z_dir = self.build_meta_features(x, cnn_price, cnn_direction_logits)
+            z_price = self.build_meta_features(x, cnn_price, cnn_direction_logits)
 
             meta_price = self.meta_price(z_price)
-            meta_direction_logits = self.meta_dir(z_dir)
 
             final_price = torch.clamp(meta_price, min=-1e6, max=1e6)
-            final_direction = meta_direction_logits
+            final_direction = cnn_direction_logits # for supervised learning only
         else:
-            ridge_price = None
+            ridge_price = torch.zeros_like(cnn_price)
             if self.ridge_fitted and self.ridge.is_fitted:
                 try:
                     ridge_price = self.ridge(x)
@@ -1043,9 +1010,8 @@ class EnsembleModule(L.LightningModule):
                         IndexError,
                         torch.cuda.OutOfMemoryError) as e:
                     logger.warning(f"Ridge prediction failed: {e}")
-                    ridge_price = torch.zeros_like(cnn_price)
 
-            lstm_direction = None
+            lstm_direction = torch.zeros_like(cnn_direction_logits)
             try:
                 lstm_direction = self.lstm(x)
                 if lstm_direction.device != cnn_direction_logits.device:
@@ -1056,7 +1022,6 @@ class EnsembleModule(L.LightningModule):
                     IndexError,
                     torch.cuda.OutOfMemoryError) as e:
                 logger.warning(f"LSTM prediction failed: {e}")
-                lstm_direction = torch.zeros_like(cnn_direction_logits)
 
             if ridge_price is not None:
                 final_price = (self.price_cnn_weight * cnn_price +
@@ -1416,18 +1381,13 @@ class EnsembleModule(L.LightningModule):
 
         with torch.no_grad():
             cnn_price, cnn_direction_logits, _, _ = self.cnn(x)
-            z_price, z_dir = self.build_meta_features(x, cnn_price, cnn_direction_logits)
+            z_price= self.build_meta_features(x, cnn_price, cnn_direction_logits)
 
             meta_price = self.meta_price(z_price)
-            meta_direction_logits = self.meta_dir(z_dir)
-            meta_direction_probs = F.softmax(meta_direction_logits, dim=1)
 
             return {
                 'meta_price': meta_price,
-                'meta_direction_logits': meta_direction_logits,
-                'meta_direction_probs': meta_direction_probs,
                 'meta_features_price': z_price,
-                'meta_features_direction': z_dir
             }
 
     def save_components(self):
@@ -1457,15 +1417,12 @@ class EnsembleModule(L.LightningModule):
         # Save meta-learners if they exist
         if self.use_meta_learning:
             meta_price_path = Path(repo_root / self.cfg.model.meta_price_path).resolve()
-            meta_direction_path = Path(repo_root / self.cfg.model.meta_direction_path).resolve()
 
             meta_price_path.parent.mkdir(parents=True, exist_ok=True)
-            meta_direction_path.parent.mkdir(parents=True, exist_ok=True)
 
             torch.save(self.meta_price.state_dict(), meta_price_path)
-            torch.save(self.meta_dir.state_dict(), meta_direction_path)
 
-            logger.info(f"Meta models saved to {meta_price_path} and {meta_direction_path}")
+            logger.info(f"Meta models saved to {meta_price_path}")
 
         logger.info(f"CNN saved to {cnn_path}")
         logger.info(f"Ridge saved to {ridge_path}")
@@ -1484,7 +1441,7 @@ class EnsembleModule(L.LightningModule):
         meta_params = []
 
         if self.use_meta_learning:
-            meta_params = list(self.meta_price.parameters()) + list(self.meta_dir.parameters())
+            meta_params = list(self.meta_price.parameters())
 
         # Set learning rates
         base_lr = self.cfg.optimiser.base_lr
