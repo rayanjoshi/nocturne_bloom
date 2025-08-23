@@ -31,7 +31,7 @@ Dependencies:
     - torch: Core PyTorch library for tensor operations.
     - torch.nn: Neural network modules.
     - torch.nn.functional: Functional operations for neural networks.
-    - torchmetrics: Metrics for evaluation (MAE, RMSE, R2, Accuracy, F1).
+    - torchmetrics: Metrics for evaluation (MAE, MAPE, R2).
     - lightning: PyTorch Lightning for scalable training.
     - omegaconf: For configuration management.
     - scripts.logging_config: Custom logging utilities.
@@ -40,8 +40,8 @@ from pathlib import Path
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torchmetrics import MeanAbsoluteError, MeanSquaredError, Accuracy, F1Score
-from torchmetrics.regression import R2Score
+from torchmetrics import MeanAbsoluteError, Metric
+from torchmetrics.regression import R2Score, MeanAbsolutePercentageError
 import lightning as L
 from omegaconf import DictConfig
 from scripts.logging_config import get_logger, setup_logging
@@ -749,6 +749,118 @@ class OrthogonalLoss(nn.Module):
         penalty = torch.mean(torch.abs(cosine_sim))
         return self.lambda_ortho * penalty, cosine_sim
 
+
+class DirectionalAccuracy(Metric):
+    """
+    Calculate directional accuracy of price predictions.
+
+    This metric computes the ratio of correct direction predictions (up, down, or flat)
+    to the total number of valid cases (non-zero price changes) across batches.
+    It compares the direction of predicted price changes against actual price changes.
+
+    Attributes:
+        higher_is_better (bool): Indicates that higher metric values are better. Set to True.
+        correct (torch.Tensor): Running sum of correct direction predictions.
+        total (torch.Tensor): Total number of valid predictions.
+        prev_pred (list or torch.Tensor): Previous batch predictions for calculating changes.
+        prev_target (list or torch.Tensor): Previous batch targets for calculating changes.
+    """
+    higher_is_better = True
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Initialize attributes so static analyzers and type checkers can see them
+        self.correct: torch.Tensor = torch.tensor(0)
+        self.total: torch.Tensor = torch.tensor(0)
+        self.prev_pred = []
+        self.prev_target = []
+        # Register states with torchmetrics
+        self.add_state("correct", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("total", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("prev_pred", default=[], persistent=False)
+        self.add_state("prev_target", default=[], persistent=False)
+
+    def update(self, *args, **kwargs):
+        """
+        Update metric with current batch predictions and targets.
+
+        Args:
+            *args: Positional arguments where:
+                - args[0] (torch.Tensor): Predicted prices for the current batch.
+                - args[1] (torch.Tensor): Target prices for the current batch.
+            **kwargs: Additional keyword arguments (ignored).
+
+        Notes:
+            - Skips the first batch as it requires previous values to compute changes.
+            - Handles variable batch sizes by truncating to the minimum length.
+        """
+        price_pred = args[0]
+        price_target = args[1]
+        _unused = kwargs
+        # Flatten if needed
+        pred = price_pred.flatten()
+        target = price_target.flatten()
+
+        # Skip first batch (need previous values)
+        if isinstance(self.prev_pred, list) and len(self.prev_pred) == 0:
+            self.prev_pred = pred.clone()
+            self.prev_target = target.clone()
+            return
+
+        # Ensure consistent batch sizes by taking the minimum length
+        min_len = min(len(pred), len(self.prev_pred))
+        pred = pred[:min_len]
+        target = target[:min_len]
+        prev_pred = self.prev_pred[:min_len]
+        prev_target = self.prev_target[:min_len]
+
+        # Compute price changes
+        pred_change = pred - prev_pred
+        target_change = target - prev_target
+
+        # Check if directions match: both up, both down, or both flat
+        same_direction = (pred_change > 0) == (target_change > 0)
+
+        # Count correct predictions
+        correct = same_direction.sum()
+        total = len(same_direction)
+
+        self.correct += correct
+        self.total += total
+
+        # Store for next batch
+        self.prev_pred = pred.clone()
+        self.prev_target = target.clone()
+
+    def compute(self):
+        """
+        Compute the directional accuracy ratio.
+
+        Returns:
+            torch.Tensor: The ratio of correct direction predictions to total valid cases.
+                Returns 0.0 if no valid cases exist (total is 0).
+        """
+        if self.total > 0:
+            return self.correct.float() / self.total.float()
+        return torch.tensor(0.0)
+
+    def reset(self) -> None:
+        """
+        Reset internal metric state safely.
+
+        We implement a custom reset to avoid the base Metric.reset trying to call
+        `.clear()` on tensor objects (which raises AttributeError). This method
+        re-initializes tensor counters and sequence states to empty lists.
+        """
+        # Reset scalar/tensor states
+        self.correct = torch.tensor(0)
+        self.total = torch.tensor(0)
+
+        # Reset sequence/previous-value states to empty lists so subsequent
+        # updates behave as the first batch logic expects.
+        self.prev_pred = []
+        self.prev_target = []
+
 class EnsembleModule(L.LightningModule):
     """
     PyTorch Lightning module for an ensemble of CNN, Ridge, and LSTM models.
@@ -827,24 +939,14 @@ class EnsembleModule(L.LightningModule):
     def _setup_metrics(self):
         # Price Metrics
         self.mae_train = MeanAbsoluteError()
-        self.rmse_train = MeanSquaredError()
+        self.mape_train = MeanAbsolutePercentageError()
         self.r2_train = R2Score()
         self.mae_val = MeanAbsoluteError()
-        self.rmse_val = MeanSquaredError()
+        self.mape_val = MeanAbsolutePercentageError()
         self.r2_val = R2Score()
-
         # Direction Metrics
-        self.direction_acc_train = Accuracy(task="multiclass", num_classes=self.num_classes)
-        self.direction_f1_train = F1Score(
-            task="multiclass",
-            num_classes=self.num_classes,
-            average="weighted",
-        )
-        self.direction_acc_val = Accuracy(task="multiclass", num_classes=self.num_classes)
-        self.direction_f1_val = F1Score(
-            task="multiclass",
-            num_classes=self.num_classes,
-            average='weighted')
+        self.dir_acc_train = DirectionalAccuracy()
+        self.dir_acc_val = DirectionalAccuracy()
 
     def build_meta_features(self, x, cnn_price, cnn_dir_logits):
         """
@@ -1120,12 +1222,9 @@ class EnsembleModule(L.LightningModule):
 
         # Update metrics
         self.mae_train.update(price_pred, price_y)
-        self.rmse_train.update(price_pred, price_y)
+        self.mape_train.update(price_pred, price_y)
         self.r2_train.update(price_pred, price_y)
-
-        direction_preds_class = torch.argmax(direction_pred, dim=1)
-        self.direction_acc_train.update(direction_preds_class, direction_y)
-        self.direction_f1_train.update(direction_preds_class, direction_y)
+        self.dir_acc_train.update(price_pred, price_y)
 
         # Log losses
         self.log('train_loss', total_loss, on_step=True, on_epoch=True, prog_bar=True)
@@ -1183,12 +1282,9 @@ class EnsembleModule(L.LightningModule):
 
         # Update metrics
         self.mae_val.update(price_pred, price_y)
-        self.rmse_val.update(price_pred, price_y)
+        self.mape_val.update(price_pred, price_y)
         self.r2_val.update(price_pred, price_y)
-
-        direction_preds_class = torch.argmax(direction_pred, dim=1)
-        self.direction_acc_val.update(direction_preds_class, direction_y)
-        self.direction_f1_val.update(direction_preds_class, direction_y)
+        self.dir_acc_val.update(price_pred, price_y)
 
         # Log losses
         self.log('val_loss', total_loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -1209,31 +1305,28 @@ class EnsembleModule(L.LightningModule):
         logger.info("Training epoch ended. Computing training metrics.")
 
         price_mae = self.mae_train.compute()
-        price_rmse = torch.sqrt(self.rmse_train.compute())
+        price_mape = self.mape_train.compute()
         price_r2 = self.r2_train.compute()
-        direction_acc = self.direction_acc_train.compute()
-        direction_f1 = self.direction_f1_train.compute()
+        dir_acc = self.dir_acc_train.compute()
 
         self.log('train_price_mae', price_mae, prog_bar=True)
-        self.log('train_price_rmse', price_rmse, prog_bar=True)
+        self.log('train_price_mape', price_mape, prog_bar=True)
         self.log('train_price_r2', price_r2, prog_bar=True)
-        self.log('train_direction_acc', direction_acc, prog_bar=True)
-        self.log('train_direction_f1', direction_f1, prog_bar=True)
+        self.log('train_dir_acc', dir_acc, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Training Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
-        logger.info(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
+        logger.info(f"Price - MAE: {price_mae:.4f}, MAPE: {price_mape:.4f}, R²: {price_r2:.4f}")
+        logger.info(f"Direction - Accuracy: {dir_acc:.4f}")
         logger.info(f"Models Fitted - Ridge: {self.ridge_fitted}")
         logger.info("--------- Training Complete ---------\n")
 
         # Reset metrics
         self.mae_train.reset()
-        self.rmse_train.reset()
+        self.mape_train.reset()
         self.r2_train.reset()
-        self.direction_acc_train.reset()
-        self.direction_f1_train.reset()
+        self.dir_acc_train.reset()
 
     def on_validation_epoch_end(self):
         """
@@ -1244,30 +1337,27 @@ class EnsembleModule(L.LightningModule):
         logger.info("Validation epoch ended. Computing validation metrics.")
 
         price_mae = self.mae_val.compute()
-        price_rmse = torch.sqrt(self.rmse_val.compute())
+        price_mape = self.mape_val.compute()
         price_r2 = self.r2_val.compute()
-        direction_acc = self.direction_acc_val.compute()
-        direction_f1 = self.direction_f1_val.compute()
+        dir_acc = self.dir_acc_val.compute()
 
         self.log('val_price_mae', price_mae, prog_bar=True)
-        self.log('val_price_rmse', price_rmse, prog_bar=True)
+        self.log('val_price_mape', price_mape, prog_bar=True)
         self.log('val_price_r2', price_r2, prog_bar=True)
-        self.log('val_direction_acc', direction_acc, prog_bar=True)
-        self.log('val_direction_f1', direction_f1, prog_bar=True)
+        self.log('val_dir_acc', dir_acc, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Validation Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
-        logger.info(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
+        logger.info(f"Price - MAE: {price_mae:.4f}, MAPE: {price_mape:.4f}, R²: {price_r2:.4f}")
+        logger.info(f"Direction - Accuracy: {dir_acc:.4f}")
         logger.info("--------- Validation Complete ---------\n")
 
         # Reset metrics
         self.mae_val.reset()
-        self.rmse_val.reset()
+        self.mape_val.reset()
         self.r2_val.reset()
-        self.direction_acc_val.reset()
-        self.direction_f1_val.reset()
+        self.dir_acc_val.reset()
 
     def test_step(self, *args, **kwargs):
         """
@@ -1295,30 +1385,24 @@ class EnsembleModule(L.LightningModule):
         logger.info("Test epoch ended. Computing test metrics.")
 
         price_mae = self.mae_val.compute()
-        price_rmse = torch.sqrt(self.rmse_val.compute())
+        price_mape = self.mape_val.compute()
         price_r2 = self.r2_val.compute()
-        direction_acc = self.direction_acc_val.compute()
-        direction_f1 = self.direction_f1_val.compute()
 
         self.log('test_price_mae', price_mae, prog_bar=True)
-        self.log('test_price_rmse', price_rmse, prog_bar=True)
+        self.log('test_price_mape', price_mape, prog_bar=True)
         self.log('test_price_r2', price_r2, prog_bar=True)
-        self.log('test_direction_acc', direction_acc, prog_bar=True)
-        self.log('test_direction_f1', direction_f1, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Test Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: {price_mae:.4f}, RMSE: {price_rmse:.4f}, R²: {price_r2:.4f}")
-        logger.info(f"Direction - Acc: {direction_acc:.4f}, F1: {direction_f1:.4f}")
+        logger.info(f"Price - MAE: {price_mae:.4f}, MAPE: {price_mape:.4f}, R²: {price_r2:.4f}")
         logger.info("--------- Test Complete ---------\n")
 
         # Reset metrics
         self.mae_val.reset()
-        self.rmse_val.reset()
+        self.mape_val.reset()
         self.r2_val.reset()
-        self.direction_acc_val.reset()
-        self.direction_f1_val.reset()
+        self.dir_acc_val.reset()
 
     def get_base_predictions(self, x):
         """
