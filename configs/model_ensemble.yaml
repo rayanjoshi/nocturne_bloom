@@ -28,6 +28,7 @@ model:
   meta_direction_path: models/meta_direction_model.pth
 
 cnn:
+  output_seq_len: 1
   inputChannels: 119  # Number of features (RSI, MACD, etc.)
   cnnChannels: [32, 16, 24]  # Reduced capacity to prevent overfitting
   kernelSize: [1, 1, 1]

@@ -71,6 +71,7 @@ class MultiHeadCNN(nn.Module):
         super().__init__()
         input_channels = cfg.cnn.inputChannels
         cnn_channels = [cfg.cnn.cnnChannels[0], cfg.cnn.cnnChannels[1], cfg.cnn.cnnChannels[2]]
+        output_seq_len = cfg.cnn.output_seq_len
 
         self.cnn = nn.Sequential(
             nn.Conv1d(
@@ -120,62 +121,59 @@ class MultiHeadCNN(nn.Module):
             ),
             nn.BatchNorm1d(cnn_channels[2]),
             nn.ReLU(inplace=True),
-
-            nn.AdaptiveAvgPool1d(1),
-            nn.Dropout(cfg.cnn.dropout[0]),
         )
 
         self.price_features = nn.Sequential(
-            nn.Linear(cnn_channels[2], cnn_channels[1]),
+            nn.Conv1d(cnn_channels[2], cnn_channels[1], kernel_size=1),
             nn.BatchNorm1d(cnn_channels[1]),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[1]),
         )
 
         self.direction_features = nn.Sequential(
-            nn.Linear(cnn_channels[2], cnn_channels[1]),
+            nn.Conv1d(cnn_channels[2], cnn_channels[1], kernel_size=1),
             nn.ReLU(),
             nn.Dropout(cfg.cnn.dropout[1] * 0.5),
 
-            nn.Linear(cnn_channels[1], cnn_channels[1] * 2),
+            nn.Conv1d(cnn_channels[1], cnn_channels[1] * 2, kernel_size=1),
             nn.BatchNorm1d(cnn_channels[1] * 2),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[1]),
 
-            nn.Linear(cnn_channels[1] * 2, cnn_channels[1]),
+            nn.Conv1d(cnn_channels[1] * 2, cnn_channels[1], kernel_size=1),
             nn.BatchNorm1d(cnn_channels[1]),
             nn.ReLU(inplace=True),
         )
 
         self.pricehead = nn.Sequential(
-            nn.Linear(cnn_channels[1], cnn_channels[2]),
+            nn.Conv1d(cnn_channels[1], cnn_channels[2], kernel_size=1),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
-            nn.Linear(cnn_channels[2], 1)
+            nn.Conv1d(cnn_channels[2], output_seq_len, kernel_size=1)
         )
 
         num_classes = cfg.cnn.num_classes
         self.directionhead = nn.Sequential(
-            nn.Linear(cnn_channels[1], cnn_channels[2] * 2),
+            nn.Conv1d(cnn_channels[1], cnn_channels[2] * 2, kernel_size=1),
             nn.BatchNorm1d(cnn_channels[2] * 2),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0] * 0.5),
 
-            nn.Linear(cnn_channels[2] * 2, cnn_channels[2] * 2),
+            nn.Conv1d(cnn_channels[2] * 2, cnn_channels[2] * 2, kernel_size=1),
             nn.BatchNorm1d(cnn_channels[2] * 2),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
 
-            nn.Linear(cnn_channels[2] * 2, cnn_channels[2]),
+            nn.Conv1d(cnn_channels[2] * 2, cnn_channels[2], kernel_size=1),
             nn.BatchNorm1d(cnn_channels[2]),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
 
-            nn.Linear(cnn_channels[2], num_classes)
+            nn.Conv1d(cnn_channels[2], num_classes, kernel_size=1)
         )
 
-        self.pooled_to_dir = nn.Linear(cnn_channels[1], cnn_channels[1])
-        self.dir_to_price = nn.Linear(cnn_channels[1], cnn_channels[1])
+        self.pooled_to_dir = nn.Conv1d(cnn_channels[1], cnn_channels[1], kernel_size=1)
+        self.dir_to_price = nn.Conv1d(cnn_channels[1], cnn_channels[1], kernel_size=1)
 
         self._initialize_weights()
 
@@ -209,48 +207,39 @@ class MultiHeadCNN(nn.Module):
         """
         Perform the forward pass of the MultiHeadCNN.
 
-        Applies convolutional layers to extract features, then splits into
-        two heads: one for price regression and another for direction
-        classification.
-
-        Residual connections and feature alignment are applied to improve
-        directional representations.
-
         Args:
-            x (torch.Tensor): Input tensor of shape
-            (batch_size, time_steps, input_channels).
+            x (torch.Tensor): Input tensor of shape (batch_size, window_size, input_channels).
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            - price_pred (torch.Tensor): Predicted price, shape
-                (batch_size,).
-            - direction_pred (torch.Tensor): Class logits, shape
-                (batch_size, num_classes).
+            - price_pred (torch.Tensor): Predicted price, shape (batch_size, output_seq_len).
+            - direction_pred (torch.Tensor): Class logits, shape (batch_size, num_classes).
             - price_features (torch.Tensor): Features used for price.
-            - direction_features (torch.Tensor): Features used for
-                classification.
+            - direction_features (torch.Tensor): Features used for classification.
         """
         logger.debug(f"MultiHeadCNN forward pass with input shape: {x.shape}")
-        x = x.transpose(1, 2)
+        x = x.transpose(1, 2)  # (batch_size, input_channels, window_size)
         x = self.cnn(x)
-        x = x.squeeze(-1)
 
         price_features = self.price_features(x)
         direction_features_raw = self.direction_features(x)
 
-        # Add pooled CNN activations to learned direction features.
-        # Project pooled activations to match direction_features_raw dim when necessary.
+        # Residual connections
         pooled = price_features
         pooled_proj = self.pooled_to_dir(pooled)
         direction_features = direction_features_raw + pooled_proj
 
-        # Ensure direction_features and price_features have same dim; project if needed
-        # Project direction_features to match price_features dim
         if direction_features.size(1) != price_features.size(1):
             direction_features = self.dir_to_price(direction_features)
 
-        price_pred = self.pricehead(price_features).squeeze(-1)
+        price_pred = self.pricehead(price_features)
+        # price_pred should be (batch_size, output_seq_len, remaining_seq_len)
+        # We want (batch_size, output_seq_len), so take the mean or last timestep
+        price_pred = price_pred.mean(dim=2)  # Average across time dimension
+
+        # Direction head - final classification, not per-timestep
         direction_pred = self.directionhead(direction_features)
+        direction_pred = direction_pred.mean(dim=2)
 
         return price_pred, direction_pred, price_features, direction_features
 
@@ -270,14 +259,14 @@ class RidgeRegressor(nn.Module):
     """
     def __init__(self, cfg: DictConfig):
         logger.info(
-            "Initializing RidgeRegressor with alpha=%0.4f, fit_intercept=%s",
-            cfg.ridge.alpha,
-            cfg.ridge.get("fit_intercept", True),
+            f"Initializing RidgeRegressor with alpha={cfg.ridge.alpha:.4f}, "
+            f"fit_intercept={cfg.ridge.fit_intercept}"
         )
         super().__init__()
         self.alpha = cfg.ridge.alpha
-        self.fit_intercept = cfg.ridge.get('fit_intercept', True)
-        self.eps = cfg.ridge.get('eps', 1e-8)
+        self.fit_intercept = cfg.ridge.fit_intercept
+        self.eps = cfg.ridge.eps
+        self.output_seq_len = cfg.cnn.output_seq_len
 
         # Ridge parameters (will be set during fit). Use placeholders so buffers
         # exist in the module and can be replaced with properly-shaped tensors
@@ -286,7 +275,6 @@ class RidgeRegressor(nn.Module):
         self.register_buffer('bias', torch.tensor(0.0))
         self.is_fitted = False
         self.register_buffer('condition_number', torch.tensor(0.0, requires_grad=False))
-
         self.fallback_count = 0  # Track fallback attempts
 
     def fit(self, x, y, rank=None):
@@ -299,7 +287,7 @@ class RidgeRegressor(nn.Module):
 
         Args:
             x (torch.Tensor): Input features, shape (batch_size, ...).
-            y (torch.Tensor): Target values, shape (batch_size,).
+            y (torch.Tensor): Target values, shape (batch_size,) or (batch_size, output_seq_len).
             rank (int, optional): Truncate SVD to this rank for low-rank fit.
 
         Raises:
@@ -313,6 +301,14 @@ class RidgeRegressor(nn.Module):
         # Flatten x to 2D if it's 3D
         if len(x.shape) == 3:
             x = x.view(x.shape[0], -1)
+
+        # Handle y dimensions - flatten if 2D but keep track of output dimension
+        output_dim = 1
+        if y.dim() == 2:
+            output_dim = y.shape[1]
+            y = y.view(-1, output_dim)  # Keep as 2D: [batch_size, output_dim]
+        elif y.dim() == 1:
+            y = y.view(-1, 1)  # Make 2D: [batch_size, 1]
 
         x = x.float()
 
@@ -344,11 +340,12 @@ class RidgeRegressor(nn.Module):
 
             # Ridge solution using SVD (all float32 math)
             s_reg = singular_values / (singular_values**2 + self.alpha + self.eps)
-            y_col = y.unsqueeze(1).to(torch.float32)
-            u_ty = u_matrix.t() @ y_col
-            s_reg_col = s_reg.unsqueeze(1)
-            theta_col = v_transpose.t() @ (s_reg_col * u_ty)
-            theta = theta_col.squeeze(1).to(device).to(orig_dtype)
+            y_float32 = y.to(torch.float32)
+            u_ty = torch.mm(u_matrix.t(), y_float32)
+            s_reg_expanded = s_reg.unsqueeze(1)
+            regularized_u_ty = s_reg_expanded * u_ty
+            theta = torch.mm(v_transpose.t(), regularized_u_ty)
+            theta = theta.to(device).to(orig_dtype)
 
         except torch.cuda.CudaError as e:
             logger.error(f"GPU memory error during SVD: {e}")
@@ -365,33 +362,36 @@ class RidgeRegressor(nn.Module):
 
             xtx_mat = torch.mm(x_with_intercept.t(), x_with_intercept)
             xtx_reg = xtx_mat + (self.alpha + self.eps) * identity
-            x_ty = torch.mv(x_with_intercept.t(), y)
+
+            # x_with_intercept.t() @ y
+            xty = torch.mm(x_with_intercept.t(), y)  # [n_features, output_dim]
 
             try:
-                theta = torch.linalg.solve(xtx_reg, x_ty)  # pylint: disable=not-callable
+                theta = torch.linalg.solve(xtx_reg, xty)  # pylint: disable=not-callable
             except RuntimeError:
                 logger.warning("Using pseudo-inverse due to singular matrix")
-                theta = torch.linalg.pinv(xtx_reg) @ x_ty  # pylint: disable=not-callable
+                theta = torch.linalg.pinv(xtx_reg) @ xty  # pylint: disable=not-callable
 
         # Validate coefficients
         if torch.any(torch.abs(theta) > 1e5):
             logger.warning(f"Large coefficients detected: max |theta| = {torch.abs(theta).max()}")
 
-        # Split weight and bias
+        # Split weight and bias - theta has shape [n_features, output_dim]
         if self.fit_intercept:
-            self.register_buffer('weight', theta[:-1].clone().detach())
-            self.register_buffer('bias', theta[-1].clone().detach())
+            self.register_buffer('weight', theta[:-1, :].clone().detach())
+            self.register_buffer('bias', theta[-1, :].clone().detach())
         else:
             self.register_buffer('weight', theta.clone().detach())
-            self.register_buffer('bias', torch.tensor(0.0, device=device))
+            self.register_buffer('bias', torch.zeros(output_dim, device=device))
 
         # Log training MAE
         with torch.no_grad():
-            y_pred = torch.matmul(x_with_intercept, theta)
+            y_pred = torch.mm(x_with_intercept, theta)  # [batch_size, output_dim]
             mae = torch.mean(torch.abs(y_pred - y))
             logger.info(f"Training MAE after fitting: {mae:.4f}")
 
         self.is_fitted = True
+
 
     def forward(self, x):
         """
@@ -404,7 +404,7 @@ class RidgeRegressor(nn.Module):
             x (torch.Tensor): Input tensor of shape (batch_size, *) or (batch_size, features).
         
         Returns:
-            torch.Tensor: Predicted values of shape (batch_size,).
+            torch.Tensor: Predicted values of shape (batch_size, output_dim).
         
         Raises:
             RuntimeError: If called before the model has been fitted using `.fit()`.
@@ -419,10 +419,13 @@ class RidgeRegressor(nn.Module):
             x = x.view(x.shape[0], -1)
 
         x = x.to(self.weight.device).float()
-        predictions = torch.matmul(x, self.weight)
+
+        predictions = torch.mm(x, self.weight)
 
         if self.fit_intercept:
-            predictions = predictions + self.bias
+            predictions = predictions + self.bias.unsqueeze(0)
+        if predictions.shape[1] == 1:
+            predictions = predictions.squeeze(1)
 
         return predictions
 
@@ -449,9 +452,8 @@ class LSTMClassifier(nn.Module):
     """
     def __init__(self, cfg: DictConfig):
         logger.info(
-            "Initializing Improved LSTMClassifier with hidden_size=%s, num_layers=%s",
-            cfg.lstm.hidden_size,
-            cfg.lstm.num_layers,
+            f"Initializing Improved LSTMClassifier with hidden_size={cfg.lstm.hidden_size}, "
+            f"num_layers={cfg.lstm.num_layers}"
         )
         super().__init__()
         self.input_size = cfg.cnn.inputChannels
@@ -515,44 +517,29 @@ class LSTMClassifier(nn.Module):
         """
         Perform a forward pass through the LSTM classifier.
         
-        Steps:
-            1. Project input features to LSTM hidden size.
-            2. Run input through a bidirectional LSTM.
-            3. Apply layer normalization and a residual connection.
-            4. Extract the last time step output.
-            5. Feed through a fully connected classifier to get logits.
-        
         Args:
             x (torch.Tensor): Input tensor of shape (batch_size, seq_len, input_size).
         
         Returns:
             torch.Tensor: Output class logits of shape (batch_size, num_classes).
+                        Note: Returns single prediction per batch, not per timestep.
         """
         logger.debug(f"LSTMClassifier forward pass with input shape: {x.shape}")
-        # Input shape: (batch, seq_len, input_size)
         batch_size = x.size(0)
-
-        # Project input to hidden_size
-        x = self.input_projection(x)  # (batch, seq_len, hidden_size)
-
-        # Initialize hidden state (*2 for bidirectional)
+        x = self.input_projection(x)  # (batch_size, seq_len, hidden_size)
         h0 = torch.zeros(self.num_layers * 2, batch_size, self.hidden_size, device=x.device)
         c0 = torch.zeros(self.num_layers * 2, batch_size, self.hidden_size, device=x.device)
-
-        # LSTM forward pass
-        out, _ = self.lstm(x, (h0, c0))  # (batch, seq_len, hidden_size * 2)
-
-        # Apply layer normalization
+        out, _ = self.lstm(x, (h0, c0))  # (batch_size, seq_len, hidden_size * 2)
         out = self.norm(out)
+        residual = self.res_proj(x)  # (batch_size, seq_len, hidden_size * 2)
+        out = out + residual  # (batch_size, seq_len, hidden_size * 2)
 
-        residual = self.res_proj(x)  # (batch, seq_len, hidden_size * 2)
-        out = out + residual  # (batch, seq_len, hidden_size * 2)
+        # Take the last timestep output for final classification
+        # This gives us one prediction per sequence, not per timestep
+        out = out[:, -1, :]  # (batch_size, hidden_size * 2)
+        logits = self.fc(out)  # (batch_size, num_classes)
 
-        # Take the last time step
-        out = out[:, -1, :]  # (batch, hidden_size * 2)
-
-        # Fully connected layer
-        logits = self.fc(out)  # (batch, num_classes)
+        logger.debug(f"LSTMClassifier output logits shape: {logits.shape}")
 
         return logits
 
@@ -560,48 +547,27 @@ class LSTMClassifier(nn.Module):
 class MetaPriceRegressor(nn.Module):
     """
     A linear regressor that combines outputs from multiple base models.
-    
-    This model acts as a learned ensemble for price prediction, typically
-    blending features such as:
-        - CNN price predictions
-        - Ridge regression outputs
-        - Directional classification probabilities
-        - LSTM-based predictions
-    
-    Can behave like Ridge regression when combined with weight decay in the optimizer.
-    
-    Args:
-        in_dim (int): Dimensionality of the input feature vector.
     """
-    def __init__(self, in_dim: int):
+    def __init__(self, in_dim: int, output_seq_len: int):
         super().__init__()
-        self.linear = nn.Linear(in_dim, 1)
+        self.output_seq_len = output_seq_len
+        self.linear = nn.Linear(in_dim, output_seq_len)
 
     def forward(self, z):
         """
         Forward pass for the price regressor.
         
         Args:
-            z (torch.Tensor): Input tensor of shape (batch_size, in_dim) containing
-                features from base models.
+            z (torch.Tensor): Input tensor of shape (batch_size, in_dim).
         
         Returns:
-            torch.Tensor: Predicted price values of shape (batch_size,).
+            torch.Tensor: Predicted price values of shape (batch_size, output_seq_len).
         """
-        return self.linear(z).squeeze(-1)
+        return self.linear(z)
 
 class MetaDirectionClassifier(nn.Module):
     """
     A linear classifier that ensembles multiple model outputs for direction prediction.
-    
-    Inputs may include:
-        - CNN logits or probabilities
-        - LSTM logits or probabilities
-        - Price predictions (optional)
-    
-    Args:
-        in_dim (int): Number of input features.
-        num_classes (int): Number of output classes.
     """
     def __init__(self, in_dim: int, num_classes: int):
         super().__init__()
@@ -902,7 +868,10 @@ class EnsembleModule(L.LightningModule):
         if self.use_meta_learning:
             meta_price_dim = 5
             meta_dir_dim = 2 * self.num_classes + 6
-            self.meta_price = MetaPriceRegressor(in_dim=meta_price_dim)
+            self.meta_price = MetaPriceRegressor(
+                in_dim=meta_price_dim,
+                output_seq_len=self.cfg.cnn.output_seq_len,
+            )
             self.meta_dir = MetaDirectionClassifier(
                 in_dim=meta_dir_dim,
                 num_classes=self.num_classes,
@@ -951,94 +920,83 @@ class EnsembleModule(L.LightningModule):
     def build_meta_features(self, x, cnn_price, cnn_dir_logits):
         """
         Construct meta-features for meta-learners from base model predictions.
-        
+
         Args:
             x (torch.Tensor): Input features.
-            cnn_price (torch.Tensor): Price prediction from CNN.
-            cnn_dir_logits (torch.Tensor): Direction logits from CNN.
-        
+            cnn_price (torch.Tensor): Price prediction from CNN, shape
+            (batch_size, output_seq_len).
+            cnn_dir_logits (torch.Tensor): Direction logits from CNN, shape
+            (batch_size, num_classes).
+
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: 
-                - Meta-features for price regression.
-                - Meta-features for direction classification.
+            Tuple[torch.Tensor, torch.Tensor]:
+            - Meta-features for price regression, shape (batch_size, 5).
+            - Meta-features for direction classification, shape
+              (batch_size, 2 * num_classes + 6).
         """
         batch_size = cnn_price.shape[0]
         device = cnn_price.device
+        cnn_dir_probs = F.softmax(cnn_dir_logits, dim=1)  # [batch_size, num_classes]
 
-        cnn_dir_probs = F.softmax(cnn_dir_logits, dim=1)
-
-        # Get base model predictions with error handling
+        ridge_price = torch.zeros(batch_size, device=device)
         if self.ridge_fitted and self.ridge.is_fitted:
             try:
                 ridge_price = self.ridge(x)
                 if ridge_price.dim() > 1:
-                    ridge_price = ridge_price.squeeze(-1)
-            except (
-                RuntimeError,
+                    ridge_price = ridge_price.squeeze(-1)  # Ensure 1D
+            except (RuntimeError,
+                    ValueError,
+                    TypeError,
+                    IndexError,
+                    torch.cuda.OutOfMemoryError) as e:
+                logger.warning(f"Ridge prediction failed in meta-features: {e}")
+
+        lstm_logits = torch.zeros(batch_size, self.num_classes, device=device)
+        try:
+            lstm_logits = self.lstm(x)  # Should be (batch_size, num_classes)
+            lstm_probs = F.softmax(lstm_logits, dim=1)
+        except (RuntimeError,
                 ValueError,
                 TypeError,
                 IndexError,
-                torch.cuda.OutOfMemoryError,
-            ) as e:
-                logger.warning(f"Ridge prediction failed in meta-features: {e}")
-                ridge_price = torch.zeros(batch_size, device=device)
-        else:
-            ridge_price = torch.zeros(batch_size, device=device)
-
-        lstm_logits = None
-        try:
-            lstm_logits = self.lstm(x)
-            lstm_probs = F.softmax(lstm_logits, dim=1)
-        except (RuntimeError, ValueError, TypeError, IndexError, torch.cuda.OutOfMemoryError) as e:
+                torch.cuda.OutOfMemoryError) as e:
             logger.warning(f"LSTM prediction failed in meta-features: {e}")
             lstm_probs = torch.zeros(batch_size, self.num_classes, device=device)
 
+        # Ensure all tensors are 1D for price calculations
+        if cnn_price.dim() > 1:
+            cnn_price = cnn_price.squeeze(-1)
+
         dir_entropy = -torch.sum(cnn_dir_probs * torch.log(cnn_dir_probs + 1e-10), dim=1)
+        price_diff = torch.abs(cnn_price - ridge_price)
+        price_mean = (cnn_price + ridge_price) / 2
+        price_disagreement = price_diff / (torch.abs(price_mean) + 1e-6)
 
-        non_zero_ridge = False
-        if ridge_price is not None:
-            non_zero_ridge = not torch.allclose(
-            ridge_price, torch.zeros_like(ridge_price)
-            )
-        if non_zero_ridge:
-            price_diff = torch.abs(cnn_price.squeeze() - ridge_price)
-            price_mean = (cnn_price.squeeze() + ridge_price) / 2
-            price_disagreement = price_diff / (torch.abs(price_mean) + 1e-6)
-        else:
-            price_disagreement = torch.zeros(batch_size, device=device)
-
-        if not torch.allclose(lstm_probs, torch.zeros_like(lstm_probs)):
-            dir_kl_div = torch.sum(cnn_dir_probs * torch.log(
-                (cnn_dir_probs + 1e-10) / (lstm_probs + 1e-10)
-            ), dim=1)
-        else:
-            dir_kl_div = torch.zeros(batch_size, device=device)
+        eps = 1e-10
+        ratio = (cnn_dir_probs + eps) / (lstm_probs + eps)
+        dir_kl_div = torch.sum(cnn_dir_probs * torch.log(ratio), dim=1)
 
         cnn_confidence = torch.max(cnn_dir_probs, dim=1)[0]
-        # Compute LSTM confidence, handle missing LSTM probs
-        if torch.allclose(lstm_probs, torch.zeros_like(lstm_probs)):
-            lstm_confidence = torch.zeros(batch_size, device=device)
-        else:
-            lstm_confidence = torch.max(lstm_probs, dim=1)[0]
+        lstm_confidence = torch.max(lstm_probs, dim=1)[0]
 
         z_price = torch.stack([
-            cnn_price.squeeze(),
-            ridge_price,
+            cnn_price.squeeze(-1) if cnn_price.dim() > 1 else cnn_price,
+            ridge_price.squeeze(-1) if ridge_price.dim() > 1 else ridge_price,
             dir_entropy,
             price_disagreement,
             cnn_confidence
-        ], dim=1)
+        ], dim=1)  # [batch_size, 5]
 
         z_dir = torch.cat([
-            cnn_price.squeeze().unsqueeze(1),
-            ridge_price.unsqueeze(1),
+            (cnn_price.squeeze(-1) if cnn_price.dim() > 1 else cnn_price).unsqueeze(1),
+            (ridge_price.squeeze(-1) if ridge_price.dim() > 1 else ridge_price).unsqueeze(1),
             dir_entropy.unsqueeze(1),
             dir_kl_div.unsqueeze(1),
             cnn_confidence.unsqueeze(1),
             lstm_confidence.unsqueeze(1),
             cnn_dir_probs,
             lstm_probs
-        ], dim=1)
+        ], dim=1)  # [batch_size, 2*num_classes + 6]
 
         return z_price, z_dir
 
@@ -1079,30 +1037,26 @@ class EnsembleModule(L.LightningModule):
                     ridge_price = self.ridge(x)
                     if ridge_price.device != cnn_price.device:
                         ridge_price = ridge_price.to(cnn_price.device)
-                    if ridge_price.shape != cnn_price.shape:
-                        ridge_price = ridge_price.view_as(cnn_price)
                 except (RuntimeError,
                         ValueError,
                         TypeError,
                         IndexError,
                         torch.cuda.OutOfMemoryError) as e:
                     logger.warning(f"Ridge prediction failed: {e}")
-                    ridge_price = None
+                    ridge_price = torch.zeros_like(cnn_price)
 
             lstm_direction = None
             try:
                 lstm_direction = self.lstm(x)
                 if lstm_direction.device != cnn_direction_logits.device:
                     lstm_direction = lstm_direction.to(cnn_direction_logits.device)
-                if lstm_direction.shape != cnn_direction_logits.shape:
-                    lstm_direction = lstm_direction.view_as(cnn_direction_logits)
             except (RuntimeError,
                     ValueError,
                     TypeError,
                     IndexError,
                     torch.cuda.OutOfMemoryError) as e:
                 logger.warning(f"LSTM prediction failed: {e}")
-                lstm_direction = None
+                lstm_direction = torch.zeros_like(cnn_direction_logits)
 
             if ridge_price is not None:
                 final_price = (self.price_cnn_weight * cnn_price +
@@ -1197,21 +1151,16 @@ class EnsembleModule(L.LightningModule):
 
         price_pred, direction_pred, price_features, direction_features = self(x)
 
-        if price_pred.dim() != price_y.dim():
-            price_pred = price_pred.view_as(price_y)
-
         price_loss = self.price_criterion(price_pred, price_y)
         direction_loss = self.direction_criterion(direction_pred, direction_y)
 
         base_losses = 0.0
         if self.include_base_losses:
             cnn_price, cnn_direction_logits, _, _ = self.cnn(x)
-            if cnn_price.dim() != price_y.dim():
-                cnn_price = cnn_price.view_as(price_y)
             base_price_loss = self.price_criterion(cnn_price, price_y)
             base_direction_loss = self.direction_criterion(cnn_direction_logits, direction_y)
             base_losses = (self.price_loss_weight * base_price_loss +
-                         self.direction_loss_weight * base_direction_loss)
+                            self.direction_loss_weight * base_direction_loss)
 
         orthogonal_penalty, cosine_sim = self.orthogonal_loss(price_features, direction_features)
 
@@ -1256,21 +1205,16 @@ class EnsembleModule(L.LightningModule):
 
         price_pred, direction_pred, price_features, direction_features = self(x)
 
-        if price_pred.dim() != price_y.dim():
-            price_pred = price_pred.view_as(price_y)
-
         price_loss = self.price_criterion(price_pred, price_y)
         direction_loss = self.direction_criterion(direction_pred, direction_y)
 
         base_losses = 0.0
         if self.include_base_losses:
             cnn_price, cnn_direction_logits, _, _ = self.cnn(x)
-            if cnn_price.dim() != price_y.dim():
-                cnn_price = cnn_price.view_as(price_y)
             base_price_loss = self.price_criterion(cnn_price, price_y)
             base_direction_loss = self.direction_criterion(cnn_direction_logits, direction_y)
             base_losses = (self.price_loss_weight * base_price_loss +
-                         self.direction_loss_weight * base_direction_loss)
+                            self.direction_loss_weight * base_direction_loss)
 
         orthogonal_penalty, cosine_sim = self.orthogonal_loss(price_features, direction_features)
 
