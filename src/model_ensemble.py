@@ -809,27 +809,26 @@ class DirectionalAccuracy(Metric):
 
 class EnsembleModule(L.LightningModule):
     """
-    PyTorch Lightning module for an ensemble of CNN, Ridge, and LSTM models.
-
-    Supports multi-headed outputs for price regression and direction
-    classification. Optionally uses meta-learners to fuse base model
-    predictions.
-
-    Components:
-        - cnn: MultiHeadCNN predicting price and direction.
-        - ridge: RidgeRegressor for linear price correction.
-        - lstm: LSTMClassifier for directional signals.
-        - meta_price / meta_dir: Optional meta-learners when enabled.
-
+    A PyTorch Lightning module that ensembles CNN, Ridge, and LSTM models.
+    
+    Combines a multi-head 1D CNN, a Ridge regressor, and a bidirectional LSTM
+    for price regression and direction classification. Supports optional
+    meta-learning for price prediction and custom losses (Focal, Orthogonal).
+    
     Attributes:
-        cfg: Hydra DictConfig for model and optimizer settings.
-        use_meta_learning: Bool indicating use of meta-learners.
-        include_base_losses: Bool to include base-model losses in total.
-        price_criterion: Loss used for price regression.
-        direction_criterion: Loss used for classification.
-        orthogonal_loss: Penalty to encourage orthogonality of features.
-        ridge_fitted: Flag set after fitting ridge on training data.
-        class_counts: Tensor of label frequencies for class weighting.
+        cfg (DictConfig): Model and optimizer configuration.
+        use_meta_learning (bool): Whether meta-learning is enabled.
+        include_base_losses (bool): Whether to include base model losses.
+        price_criterion (nn.Module): Loss for price regression.
+        direction_criterion (nn.Module): Loss for direction classification.
+        orthogonal_loss (nn.Module): Penalty enforcing feature orthogonality.
+        ridge_fitted (bool): Flag set when Ridge model has been fitted.
+        class_counts (torch.Tensor): Label frequencies for class balancing.
+        cnn (MultiHeadCNN): CNN for feature extraction and prediction.
+        ridge (RidgeRegressor): Ridge regressor for linear corrections.
+        lstm (LSTMClassifier): LSTM classifier for direction.
+        meta_price (MetaPriceRegressor): Meta-learner for price (optional).
+        num_classes (int): Number of direction classes.
     """
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing EnsembleModule with config: {cfg.model}")
@@ -894,18 +893,21 @@ class EnsembleModule(L.LightningModule):
 
     def build_meta_features(self, x, cnn_price, cnn_dir_logits):
         """
-        Construct meta-features for meta-learners from base model predictions.
-
+        Construct meta-features for price meta-learner from base outputs.
+        
+        Generates features including CNN and Ridge predictions,
+        direction entropy, model disagreement, and directional signals.
+        
         Args:
-            x (torch.Tensor): Input features.
-            cnn_price (torch.Tensor): Price prediction from CNN, shape
-            (batch_size, output_seq_len).
-            cnn_dir_logits (torch.Tensor): Direction logits from CNN, shape
-            (batch_size, num_classes).
-
+            x (torch.Tensor): Input, shape (batch, seq_len, input_channels).
+            cnn_price (torch.Tensor): CNN price preds,
+            shape (batch, output_seq_len).
+            cnn_dir_logits (torch.Tensor): CNN direction logits,
+            shape (batch, num_classes).
+        
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]:
-            - Meta-features for price regression, shape (batch_size, 9).
+            torch.Tensor: Meta-features for price regression,
+            shape (batch, 9).
         """
         batch_size = cnn_price.shape[0]
         device = cnn_price.device
@@ -974,16 +976,26 @@ class EnsembleModule(L.LightningModule):
 
     def forward(self, *args, **kwargs):
         """
-        Forward pass of the ensemble module.
+        Perform forward pass of the ensemble module.
         
-        Depending on whether meta-learning is enabled, either base predictions are blended
-        or meta-models are used for final outputs.
+        Combines base model predictions (CNN, Ridge, LSTM) or uses a
+        meta-learner for price prediction when enabled. Returns price
+        predictions, direction logits, and feature embeddings.
         
         Args:
-            x (torch.Tensor): Input features.
+            x (torch.Tensor): Input features with shape
+            (batch_size, seq_len, input_channels).
         
         Returns:
-            Tuple[torch.Tensor]: Final price prediction.
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            - final_price: Final price prediction with shape
+                (batch_size, output_seq_len).
+            - final_direction: Direction logits with shape
+                (batch_size, num_classes).
+            - price_features: Price feature embeddings with shape
+                (batch_size, feature_dim, seq_len).
+            - direction_features: Direction feature embeddings with shape
+                (batch_size, feature_dim, seq_len).
         """
         x = args[0]
         logger.debug(f"EnsembleModule forward pass with input shape: {x.shape}")
@@ -1365,16 +1377,15 @@ class EnsembleModule(L.LightningModule):
 
     def get_meta_predictions(self, x):
         """
-        Retrieve predictions from the meta-learners.
+        Retrieve predictions from the price meta-learner.
         
         Args:
-            x (torch.Tensor): Input features.
+            x (torch.Tensor): Input features, shape (batch_size, seq_len, input_channels).
         
         Returns:
-            dict: Dictionary containing meta predictions and corresponding features.
-        
-        Raises:
-            ValueError: If meta-learning is disabled.
+            dict: Dictionary containing meta-learner price predictions and features, with keys:
+                - 'meta_price': Price predictions, shape (batch_size, output_seq_len).
+                - 'meta_features_price': Meta-features for price, shape (batch_size, 9).
         """
         if not self.use_meta_learning:
             raise ValueError("Meta-learning is disabled. Use get_base_predictions() instead.")
@@ -1392,9 +1403,10 @@ class EnsembleModule(L.LightningModule):
 
     def save_components(self):
         """
-        Save the model components (CNN, Ridge, LSTM, and meta-learners if used) to disk.
+        Save model components (CNN, Ridge, LSTM, and meta-learner if used) to disk.
         
-        File paths are defined in the configuration.
+        Saves model state dictionaries to paths specified in the configuration.
+        Ensures parent directories exist before saving.
         """
         logger.info("Saving model components to disk.")
         script_dir = Path(__file__).parent
@@ -1430,10 +1442,13 @@ class EnsembleModule(L.LightningModule):
 
     def configure_optimizers(self):
         """
-        Configure optimizers and learning rate scheduler.
+        Configure optimizer and LR scheduler.
+        
+        Uses Adam with separate learning rates for base models and an optional
+        meta-learner. Scheduler is ReduceLROnPlateau monitoring 'val_loss'.
         
         Returns:
-            dict: Optimizer and LR scheduler configuration for PyTorch Lightning.
+            dict: {'optimizer', 'lr_scheduler', 'monitor'}.
         """
         logger.info("Configuring optimizers and learning rate scheduler.")
 
