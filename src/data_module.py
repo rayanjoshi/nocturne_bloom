@@ -127,6 +127,7 @@ class StockDataset(Dataset):
         window_size = cfg.data_module.window_size
         price_target_col = cfg.data_module.price_target_col
         direction_target_col = cfg.data_module.direction_target_col
+        output_seq_len = cfg.data_module.output_seq_len
 
         target_cols = [price_target_col, direction_target_col]
         features = df.drop(columns=[col for col in df.columns if col in target_cols])
@@ -141,9 +142,16 @@ class StockDataset(Dataset):
         x = sliding_window_view(
             features_array,
             window_shape=(window_size, features_array.shape[1])
-        )[:-1].reshape(-1, window_size, features_array.shape[1])
+        )[:-output_seq_len].reshape(-1, window_size, features_array.shape[1])
         price_y = price_target_array[window_size:]
         direction_y = direction_target_array[window_size:]
+
+        price_y = sliding_window_view(
+                price_target_array,
+                window_shape=output_seq_len
+            )[window_size:].reshape(-1, output_seq_len)
+
+        direction_y = direction_target_array[window_size:window_size + len(price_y)]
 
         x = np.array(x)
         price_y = np.array(price_y)
@@ -194,17 +202,23 @@ class StockDataset(Dataset):
         # Scale targets (fit on train only)
         logger.info("Scaling price targets...")
         price_target_scaler = RobustScaler()
-        y_train_scaled = price_target_scaler.fit_transform(price_y_train.reshape(-1, 1)).flatten()
-        y_val_scaled = price_target_scaler.transform(price_y_val.reshape(-1, 1)).flatten()
+        price_y_train_reshaped = price_y_train.reshape(-1, 1)  # Flatten for scaling
+        price_y_train_scaled = price_target_scaler.fit_transform(
+            price_y_train_reshaped
+        ).reshape(price_y_train.shape)
+        price_y_val_reshaped = price_y_val.reshape(-1, 1)
+        price_y_val_scaled = price_target_scaler.transform(
+            price_y_val_reshaped
+        ).reshape(price_y_val.shape)
 
-        min_train = y_train_scaled.min()
-        max_train = y_train_scaled.max()
+        min_train = price_y_train_scaled.min()
+        max_train = price_y_train_scaled.max()
         logger.info(
             "Train targets after scaling: "
             f"[{min_train:.6f}, {max_train:.6f}]"
         )
-        min_val = y_val_scaled.min()
-        max_val = y_val_scaled.max()
+        min_val = price_y_val_scaled.min()
+        max_val = price_y_val_scaled.max()
         logger.info(
             "Val targets after scaling: "
             f"[{min_val:.6f}, {max_val:.6f}]"
@@ -213,7 +227,7 @@ class StockDataset(Dataset):
 
         # Combine back maintaining temporal order
         x_scaled = np.concatenate([x_train_scaled, x_val_scaled])
-        price_y_scaled = np.concatenate([y_train_scaled, y_val_scaled])
+        price_y_scaled = np.concatenate([price_y_train_scaled, price_y_val_scaled])
         direction_y_final = np.concatenate([direction_y_train, direction_y_val])
 
         # Save scalers
@@ -278,9 +292,9 @@ class StockDataset(Dataset):
         Returns:
             Tuple[Tensor, Tensor, Tensor]: x, price_y, and direction_y as tensors.
         """
-        x = torch.tensor(self.x[idx], dtype=torch.float32)
-        price_y = torch.tensor(self.price_y[idx], dtype=torch.float32)
-        direction_y = torch.tensor(self.direction_y[idx], dtype=torch.long)
+        x = torch.tensor(self.x[idx], dtype=torch.float32)  # Shape: [window_size, num_features]
+        price_y = torch.tensor(self.price_y[idx], dtype=torch.float32)  # Shape: [output_seq_len]
+        direction_y = torch.tensor(self.direction_y[idx], dtype=torch.long)  # Shape: scalar
         return x, price_y, direction_y
 
     def save_tensors(self, cfg: DictConfig):

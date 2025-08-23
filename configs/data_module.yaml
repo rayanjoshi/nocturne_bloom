@@ -2,6 +2,7 @@ data_module:
   window_size: 10
   price_target_col: Price_Target
   direction_target_col: Direction_Target
+  output_seq_len: 1
   x_save_path: data/processed/nvda_processed_x.pt
   price_y_save_path: data/processed/nvda_processed_price_y.pt
   direction_y_save_path: data/processed/nvda_processed_direction_y.pt
