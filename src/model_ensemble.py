@@ -174,17 +174,19 @@ class MultiHeadCNN(nn.Module):
             nn.Linear(cnn_channels[2], num_classes)
         )
 
+        self.pooled_to_dir = nn.Linear(cnn_channels[1], cnn_channels[1])
+        self.dir_to_price = nn.Linear(cnn_channels[1], cnn_channels[1])
+
         self._initialize_weights()
 
     def _initialize_weights(self):
         """
-        Initialize weights of convolutional, linear, and batch norm layers.
-        
-        - Convolutional and non-head linear layers use Kaiming initialization.
-        - Classification head linear layers use Xavier initialization.
-        - BatchNorm layers are initialized to preserve scale and shift.
-        
-        This promotes better convergence during training.
+        Initialize weights for convolutional, linear, and batch normalization layers.
+
+        This method applies specific initialization techniques to different layer types to
+        promote better convergence during training. Convolutional and non-head linear layers
+        use Kaiming initialization, classification head linear layers use Xavier initialization,
+        and batch normalization layers are initialized to preserve scale and shift.
         """
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
@@ -192,12 +194,11 @@ class MultiHeadCNN(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
-                # Check if the module is part of self.directionhead
-                if m in self.directionhead.modules():
+                # Check if this is an output head
+                if m in self.pricehead.modules() or m in self.directionhead.modules():
                     nn.init.xavier_uniform_(m.weight)
                 else:
                     nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
-                    nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.BatchNorm1d):
@@ -239,27 +240,17 @@ class MultiHeadCNN(nn.Module):
 
         # Add pooled CNN activations to learned direction features.
         # Project pooled activations to match direction_features_raw dim when necessary.
-        pooled = F.adaptive_avg_pool1d(x.unsqueeze(-1), 1).squeeze(-1)  # pylint: disable=not-callable
-        if pooled.size(1) != direction_features_raw.size(1):
-            pooled = F.linear(pooled,  # pylint: disable=not-callable
-                        torch.eye(direction_features_raw.size(1), pooled.size(1),
-                        device=pooled.device, dtype=pooled.dtype))
-
-        direction_features = direction_features_raw + pooled
+        pooled = price_features
+        pooled_proj = self.pooled_to_dir(pooled)
+        direction_features = direction_features_raw + pooled_proj
 
         # Ensure direction_features and price_features have same dim; project if needed
+        # Project direction_features to match price_features dim
         if direction_features.size(1) != price_features.size(1):
-            # Project direction_features to match price_features dim
-            eye = torch.eye(
-                price_features.size(1),
-                direction_features.size(1),
-                device=direction_features.device,
-                dtype=direction_features.dtype,
-            )
-            direction_features = F.linear(direction_features, eye)  # pylint: disable=not-callable
+            direction_features = self.dir_to_price(direction_features)
 
         price_pred = self.pricehead(price_features).squeeze(-1)
-        direction_pred = self.directionhead(direction_features_raw)
+        direction_pred = self.directionhead(direction_features)
 
         return price_pred, direction_pred, price_features, direction_features
 
@@ -288,10 +279,13 @@ class RidgeRegressor(nn.Module):
         self.fit_intercept = cfg.ridge.get('fit_intercept', True)
         self.eps = cfg.ridge.get('eps', 1e-8)
 
-        # Ridge parameters (will be set during fit)
-        self.register_buffer('weight', torch.tensor(0.0, requires_grad=False))
-        self.register_buffer('bias', torch.tensor(0.0, requires_grad=False))
+        # Ridge parameters (will be set during fit). Use placeholders so buffers
+        # exist in the module and can be replaced with properly-shaped tensors
+        # when `.fit()` computes the coefficients.
+        self.register_buffer('weight', torch.empty(0))
+        self.register_buffer('bias', torch.tensor(0.0))
         self.is_fitted = False
+        self.register_buffer('condition_number', torch.tensor(0.0, requires_grad=False))
 
         self.fallback_count = 0  # Track fallback attempts
 
@@ -330,28 +324,31 @@ class RidgeRegressor(nn.Module):
             x_with_intercept = x
 
         try:
-            with torch.cuda.amp.autocast():
-                u_matrix, singular_values, v_transpose = torch.linalg.svd(   # pylint: disable=not-callable
-                    x_with_intercept, full_matrices=False
-                )
-                if rank is not None:
-                    u_matrix = u_matrix[:, :rank]
-                    singular_values = singular_values[:rank]
-                    v_transpose = v_transpose[:rank, :]
+            # Compute SVD in float32 explicitly for numerical stability
+            orig_dtype = x_with_intercept.dtype
+            x_svd = x_with_intercept.to(torch.float32)
 
-                # Log condition number
-                max_sv = torch.max(singular_values)
-                min_sv = torch.min(singular_values)
-                condition_number = max_sv / (min_sv + self.eps)
-                logger.info(f"Matrix condition number: {condition_number:.4f}")
+            u_matrix, singular_values, v_transpose = torch.linalg.svd(  # pylint: disable=not-callable
+                x_svd, full_matrices=False
+            )
+            if rank is not None:
+                u_matrix = u_matrix[:, :rank]
+                singular_values = singular_values[:rank]
+                v_transpose = v_transpose[:rank, :]
 
-                # Ridge solution using SVD
-                s_reg = singular_values / (singular_values**2 + self.alpha + self.eps)
-                y_col = y.unsqueeze(1)
-                u_ty = u_matrix.t() @ y_col
-                s_reg_col = s_reg.unsqueeze(1)
-                theta_col = v_transpose.t() @ (s_reg_col * u_ty)
-                theta = theta_col.squeeze(1)
+            # Log condition number (computed in float32)
+            max_sv = torch.max(singular_values)
+            min_sv = torch.min(singular_values)
+            condition_number = (max_sv / (min_sv + self.eps)).to(x_with_intercept.dtype)
+            logger.info(f"Matrix condition number: {condition_number:.4f}")
+
+            # Ridge solution using SVD (all float32 math)
+            s_reg = singular_values / (singular_values**2 + self.alpha + self.eps)
+            y_col = y.unsqueeze(1).to(torch.float32)
+            u_ty = u_matrix.t() @ y_col
+            s_reg_col = s_reg.unsqueeze(1)
+            theta_col = v_transpose.t() @ (s_reg_col * u_ty)
+            theta = theta_col.squeeze(1).to(device).to(orig_dtype)
 
         except torch.cuda.CudaError as e:
             logger.error(f"GPU memory error during SVD: {e}")
@@ -382,11 +379,11 @@ class RidgeRegressor(nn.Module):
 
         # Split weight and bias
         if self.fit_intercept:
-            self.weight.data = theta[:-1].clone().detach()
-            self.bias.data = theta[-1].clone().detach()
+            self.register_buffer('weight', theta[:-1].clone().detach())
+            self.register_buffer('bias', theta[-1].clone().detach())
         else:
-            self.weight.data = theta.clone().detach()
-            self.bias.data = torch.tensor(0.0, device=device)
+            self.register_buffer('weight', theta.clone().detach())
+            self.register_buffer('bias', torch.tensor(0.0, device=device))
 
         # Log training MAE
         with torch.no_grad():
@@ -465,6 +462,7 @@ class LSTMClassifier(nn.Module):
 
         # Input projection to align CNN features
         self.input_projection = nn.Linear(self.input_size, self.hidden_size)
+        self.res_proj = nn.Linear(self.hidden_size, self.hidden_size * 2)
 
         # Bidirectional LSTM
         self.lstm = nn.LSTM(
@@ -506,10 +504,9 @@ class LSTMClassifier(nn.Module):
                     nn.init.constant_(m.bias, 0.0)
             elif isinstance(m, nn.LSTM):
                 for name, param in m.named_parameters():
-                    if 'weight' in name:
-                        nn.init.xavier_uniform_(param)
-                    elif 'bias' in name:
+                    if 'bias' in name:
                         nn.init.constant_(param, 0.0)
+                    # Leave LSTM weights with default initialization
             elif isinstance(m, nn.LayerNorm):
                 nn.init.constant_(m.weight, 1.0)
                 nn.init.constant_(m.bias, 0.0)
@@ -548,14 +545,7 @@ class LSTMClassifier(nn.Module):
         # Apply layer normalization
         out = self.norm(out)
 
-        # Residual connection (project input to match LSTM output size)
-        identity = torch.eye(
-            self.hidden_size * 2,
-            self.hidden_size,
-            device=x.device,
-            dtype=x.dtype
-        )
-        residual = F.linear(x, identity)  # pylint: disable=not-callable
+        residual = self.res_proj(x)  # (batch, seq_len, hidden_size * 2)
         out = out + residual  # (batch, seq_len, hidden_size * 2)
 
         # Take the last time step
