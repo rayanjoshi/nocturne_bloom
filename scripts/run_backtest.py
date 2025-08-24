@@ -448,9 +448,11 @@ class StrategySimulation(bt.Strategy):
         base_size=500,     # base position size
         stop_loss=0.03,    # stop loss
         take_profit=0.1,  # take profit
-        max_hold=10,        # max bars to hold
+        min_hold=1,
+        max_hold=28,        # max bars to hold
         max_size=5000,      # maximum position size
-        trend_window=30      # lookback for trend
+        trend_window=30,      # lookback for trend
+        atr_window=14,      # ATR window for volatility-adjusted holding period
     )
 
     def __init__(self, cfg: DictConfig, predictions, close_prices, dates=None):
@@ -468,6 +470,7 @@ class StrategySimulation(bt.Strategy):
         self.data.close = self.datas[0].close
         self.returns = pd.Series(close_prices).pct_change()
         self.logger = get_logger("StrategySimulation")
+        self.atr = bt.indicators.ATR(self.datas[0], period=self.p.atr_window)
 
     def update_recent_performance(self, pnl):
         """
@@ -525,29 +528,41 @@ class StrategySimulation(bt.Strategy):
         predicted_return = (predicted_close - current_close) / current_close
         sigma = self.returns.iloc[idx - self.p.vol_window:idx].std()
 
-        is_uptrend = False
-        if len(self.close_prices) > self.p.trend_window:
-            sma_50 = np.mean(self.close_prices[idx-self.p.trend_window:idx])
-            is_uptrend = current_close > sma_50
-        recent_returns = self.returns.iloc[idx-3:idx].mean()
+        sma_50 = np.mean(self.close_prices[idx-self.p.trend_window:idx])
+        is_uptrend = current_close > sma_50
+        atr_value = self.atr[0]
+        atr_normalized = atr_value / current_close if current_close != 0 else 0
 
+        dynamic_max_hold = self.p.min_hold + int(10 * min(atr_normalized / 0.02, 1.0))
+
+        dynamic_take_profit = self.p.take_profit * (1 + atr_normalized / 0.1)
 
         # Exit logic
         if self.position:
             self.hold_counter += 1
             pnl = (current_close - self.position.price) / self.position.price
-            if (self.position.size > 0 and (
-                pnl <= -self.p.stop_loss or pnl >= self.p.take_profit
-            )) or (self.position.size < 0 and (
-                pnl >= self.p.stop_loss or pnl <= -self.p.take_profit
-            )) or self.hold_counter >= self.p.max_hold:
-                self.log(f"CLOSE, {current_close:.2f}, Profit={pnl:.2%}")
+            exit_condition = False
+            if self.position.size > 0:  # Long position
+                exit_condition = (
+                    pnl <= -self.p.stop_loss or
+                    pnl >= dynamic_take_profit or
+                    self.hold_counter >= (dynamic_max_hold if is_uptrend else self.p.min_hold)
+                )
+            elif self.position.size < 0:  # Short position
+                exit_condition = (
+                    pnl >= self.p.stop_loss or
+                    pnl <= -dynamic_take_profit or
+                    self.hold_counter >= (dynamic_max_hold if not is_uptrend else self.p.min_hold)
+                )
+            if exit_condition:
+                self.log(f"CLOSE, {current_close:.2f}, Profit={pnl:.2%}, Hold={self.hold_counter} bars")
                 self.close()
                 self.hold_counter = 0
             return
 
         # Entry logic
         if abs(predicted_return) > self.p.k * sigma:
+            recent_returns = self.returns.iloc[idx-3:idx].mean()
             # Long trades: uptrend + positive prediction + not strongly negative momentum
             if predicted_return > 0 and is_uptrend and recent_returns > -0.01:
                 confidence = predicted_return / (self.p.k * sigma)
@@ -558,9 +573,9 @@ class StrategySimulation(bt.Strategy):
                     recent_win_rate = 0.5
 
                 if recent_win_rate > 0.6:
-                    size_multiplier = 1.5
+                    size_multiplier = 2
                 elif recent_win_rate < 0.3:
-                    size_multiplier = 0.7
+                    size_multiplier = 0.5
                 else:
                     size_multiplier = 1.0
 
@@ -577,9 +592,9 @@ class StrategySimulation(bt.Strategy):
                     recent_win_rate = 0.5
 
                 if recent_win_rate > 0.6:
-                    size_multiplier = 1.5
+                    size_multiplier = 2
                 elif recent_win_rate < 0.3:
-                    size_multiplier = 0.7
+                    size_multiplier = 0.5
                 else:
                     size_multiplier = 1.0
 
