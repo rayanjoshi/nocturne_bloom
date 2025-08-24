@@ -6,11 +6,11 @@ defaults:
 trainer:
   project_name: "NVDA Stock Predictor - Ensemble"
   run_name: "Ensemble Model"
-  max_epochs: 60  # More epochs with early stopping
+  max_epochs: 120  # More epochs with early stopping
   accelerator: "auto"
   devices: 1
   log_every_n_steps: 10  # Optimized logging frequency
   seed: 42  # Optimized seed for reproducibility
-  early_stopping_patience: 8  # Stop after 8 epochs with no improvement
-  early_stopping_delta: 0.00455105461433482  # Optimized delta for early stopping
-  gradient_clip_val: 3.590219704044394  # Gradient clipping to prevent exploding gradients
+  early_stopping_patience: 5  # Stop after 5 epochs with no improvement
+  early_stopping_delta: 0.05989307759241627  # Optimized delta for early stopping
+  gradient_clip_val: 1.1663433374104497  # Gradient clipping to prevent exploding gradients

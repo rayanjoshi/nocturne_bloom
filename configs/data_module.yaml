@@ -1,5 +1,5 @@
 data_module:
-  window_size: 10
+  window_size: 20
   price_target_col: Price_Target
   direction_target_col: Direction_Target
   output_seq_len: 1
@@ -8,7 +8,7 @@ data_module:
   direction_y_save_path: data/processed/nvda_processed_direction_y.pt
   price_y_scaled_save_path: models/Price_Target_scaler.pkl
   x_scaled_save_path: models/feature_scaler.pkl
-  batch_size: 128
+  batch_size: 16
   num_workers: 7
   train_val_split: 0.8
 
