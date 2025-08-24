@@ -1,39 +1,46 @@
-"""Ensemble module for time series prediction with CNN, Ridge, and LSTM models.
+"""
+Ensemble module for time series prediction with CNN, Ridge, and LSTM models.
 
-This module implements a PyTorch Lightning-based ensemble model that combines
-a multi-head 1D Convolutional Neural Network (CNN), a Ridge regression model,
-and a bidirectional Long Short-Term Memory (LSTM) classifier for joint price
-regression and market direction classification tasks. It supports optional
-meta-learners to fuse base model predictions and incorporates custom loss
-functions like Focal Loss and Orthogonal Loss to handle class imbalance and
-feature orthogonality.
+This module implements a PyTorch Lightning-based ensemble model combining a
+multi-head 1D CNN, Ridge regression, and bidirectional LSTM for joint price
+regression and market direction classification. It supports an optional
+meta-learner for price prediction and custom loss functions like Focal Loss
+(with effective sample weighting) and Orthogonal Loss (penalizing feature
+correlation) to handle class imbalance and encourage feature orthogonality.
 
-The module is designed for time series data, leveraging 1D convolutions for
-feature extraction, Ridge regression for linear corrections, and LSTMs for
-sequential modeling. It includes comprehensive logging, metric tracking, and
-model checkpointing.
+The module processes time series data with input shape
+`(batch_size, seq_len, input_channels)`, producing price predictions of shape
+`(batch_size, output_seq_len)` and direction logits of shape
+`(batch_size, num_classes)`. It includes logging, metrics (MAE, WMAPE, R²,
+directional accuracy), and checkpointing.
 
-Key components:
-- `MultiHeadCNN`: A 1D CNN with separate heads for price regression and
-    direction classification.
-- `RidgeRegressor`: A Ridge regression model with SVD-based fitting.
-- `LSTMClassifier`: A bidirectional LSTM for direction classification.
-- `MetaPriceRegressor` and `MetaDirectionClassifier`: Optional meta-learners
-    for ensembling base model outputs.
-- `FocalLoss`: A class-balanced loss function focusing on hard examples.
-- `OrthogonalLoss`: A penalty to encourage feature orthogonality.
-- `EnsembleModule`: The main PyTorch Lightning module orchestrating the ensemble.
-
-The module adheres to PEP 8 style guidelines and PEP 257 docstring conventions
-for improved readability and maintainability.
+Key Components:
+    -   MultiHeadCNN: 1D CNN with separate heads for price regression and
+        direction classification, using residual connections.
+    -   RidgeRegressor: Ridge regression with SVD-based fitting and normal
+        equations fallback for stability.
+    -   LSTMClassifier: Bidirectional LSTM for direction classification with
+        layer normalization and residual connections.
+    -   MetaPriceRegressor: Optional meta-learner for ensembling price
+        predictions.
+    -   FocalLoss: Class-balanced loss using effective sample weighting
+        (configurable via `gamma` and `beta`).
+    -   OrthogonalLoss: Penalty to minimize cosine similarity between price and
+        direction feature embeddings.
+    -   DirectionalAccuracy: Metric to evaluate accuracy of predicted price
+        movement directions.
+    -   EnsembleModule: Main PyTorch Lightning module orchestrating the ensemble.
 
 Dependencies:
-    - torch: Core PyTorch library for tensor operations.
+    - torch: Core tensor operations.
     - torch.nn: Neural network modules.
-    - torch.nn.functional: Functional operations for neural networks.
-    - torchmetrics: Metrics for evaluation (MAE, WWMAPE, R2).
+    - torch.nn.functional: Functional neural network operations.
+    - torchmetrics: Metrics (MAE, WMAPE, R²).
     - lightning: PyTorch Lightning for scalable training.
-    - omegaconf: For configuration management.
+    - omegaconf: Configuration management via DictConfig.
+    - pathlib: File path handling.
+    - joblib: Loading target scalers.
+    - numpy: Numerical operations for metrics.
     - scripts.logging_config: Custom logging utilities.
 """
 from pathlib import Path
@@ -53,20 +60,33 @@ logger = get_logger("model_ensemble")
 
 class MultiHeadCNN(nn.Module):
     """
-    A multi-head 1D CNN model for joint regression and classification tasks.
-    
-    This model processes input time series using stacked 1D convolutional layers 
-    followed by two separate heads:
-        - A regression head for predicting price.
-        - A classification head for predicting market direction.
-    
-    The architecture uses batch normalization, dropout, and ReLU activations 
-    to stabilize training and reduce overfitting.
-    
+    Multi-head 1D CNN for joint time series regression and classification.
+
+    Processes input time series with stacked 1D convolutional layers, followed by
+    separate heads for price regression and market direction classification. Uses
+    batch normalization, dropout, and ReLU activations to stabilize training.
+
     Args:
-        cfg (DictConfig): Configuration object specifying CNN architecture parameters,
-            including input channels, number of classes, layer sizes, dropout rates, 
-            kernel sizes, paddings, and strides.
+        cfg (DictConfig): Configuration object with CNN parameters:
+            - cnn.inputChannels (int): Number of input channels.
+            - cnn.num_classes (int): Number of output classes for classification.
+            - cnn.cnnChannels (list): List of channel sizes for CNN layers.
+            - cnn.kernelSize (list): Kernel sizes for convolutional layers.
+            - cnn.padding (list): Padding sizes for convolutional layers.
+            - cnn.poolSize (list): Pooling kernel sizes.
+            - cnn.poolPadding (list): Pooling padding sizes.
+            - cnn.stride (int): Stride for pooling layers.
+            - cnn.dropout (list): Dropout rates for layers.
+            - cnn.output_seq_len (int): Length of output price sequence.
+
+    Attributes:
+        cnn (nn.Sequential): Main convolutional backbone.
+        price_features (nn.Sequential): Layers for price feature extraction.
+        direction_features (nn.Sequential): Layers for direction feature extraction.
+        pricehead (nn.Sequential): Head for price regression.
+        directionhead (nn.Sequential): Head for direction classification.
+        pooled_to_dir (nn.Conv1d): Projection for residual connection.
+        dir_to_price (nn.Conv1d): Projection for feature alignment.
     """
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing CNN model with config: {cfg.cnn}")
@@ -207,17 +227,22 @@ class MultiHeadCNN(nn.Module):
 
     def forward(self, x):
         """
-        Perform the forward pass of the MultiHeadCNN.
+        Forward pass of the MultiHeadCNN.
 
         Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, window_size, input_channels).
+            x (torch.Tensor): Input tensor of shape
+            (batch_size, seq_len, input_channels).
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            - price_pred (torch.Tensor): Predicted price, shape (batch_size, output_seq_len).
-            - direction_pred (torch.Tensor): Class logits, shape (batch_size, num_classes).
-            - price_features (torch.Tensor): Features used for price.
-            - direction_features (torch.Tensor): Features used for classification.
+            - price_pred: Predicted prices, shape:
+              (batch_size, output_seq_len).
+            - direction_pred: Direction logits, shape:
+              (batch_size, num_classes).
+            - price_features: Price feature embeddings, shape:
+              (batch_size, channels, seq_len).
+            - direction_features: Direction feature embeddings, shape:
+              (batch_size, channels, seq_len).
         """
         logger.debug(f"MultiHeadCNN forward pass with input shape: {x.shape}")
         x = x.transpose(1, 2)  # (batch_size, input_channels, window_size)
@@ -247,17 +272,25 @@ class MultiHeadCNN(nn.Module):
 
 class RidgeRegressor(nn.Module):
     """
-    Ridge regression model implemented using PyTorch.
-    
-    This class supports fitting a linear model with L2 regularization (Ridge)
-    using either Singular Value Decomposition (SVD) or a normal equations fallback.
-    It handles optional intercept fitting and can be used in GPU-accelerated pipelines.
-    
+    Ridge regression model with L2 regularization using PyTorch.
+
+    Fits a linear model using Singular Value Decomposition (SVD) for stability,
+    with a fallback to regularized normal equations if SVD fails. Supports optional
+    intercept fitting and GPU acceleration.
+
     Args:
-        cfg (DictConfig): Configuration object containing the following Ridge parameters:
-            - alpha (float): Regularization strength.
-            - fit_intercept (bool, optional): Whether to fit an intercept. Defaults to True.
-            - eps (float, optional): Small value to prevent division by zero. Defaults to 1e-8.
+        cfg (DictConfig): Configuration with Ridge parameters:
+            - ridge.alpha (float): L2 regularization strength.
+            - ridge.fit_intercept (bool): Whether to fit an intercept (default: True).
+            - ridge.eps (float): Small value for numerical stability (default: 1e-8).
+            - cnn.output_seq_len (int): Length of output sequence.
+
+    Attributes:
+        weight (torch.Tensor): Learned weights, shape depends on input features.
+        bias (torch.Tensor): Learned bias, shape (output_seq_len,) or scalar.
+        condition_number (torch.Tensor): Condition number of input matrix.
+        is_fitted (bool): Whether the model has been fitted.
+        fallback_count (int): Number of times SVD fallback was used.
     """
     def __init__(self, cfg: DictConfig):
         logger.info(
@@ -282,19 +315,16 @@ class RidgeRegressor(nn.Module):
 
     def fit(self, x, y, rank=None):
         """
-        Fit the Ridge regression model using input features and targets.
+        Fit the Ridge regression model.
 
-        Uses SVD for a numerically stable solution. Falls back to solving the
-        regularized normal equations if SVD fails. Learns weights and an
-        optional intercept.
+        Uses SVD for stability, falling back to normal equations if needed. Supports
+        multi-dimensional outputs for sequence prediction.
 
         Args:
-            x (torch.Tensor): Input features, shape (batch_size, ...).
+            x (torch.Tensor): Input features, shape (batch_size, seq_len, input_channels)
+                or (batch_size, features).
             y (torch.Tensor): Target values, shape (batch_size,) or (batch_size, output_seq_len).
-            rank (int, optional): Truncate SVD to this rank for low-rank fit.
-
-        Raises:
-            RuntimeError: If fitting fails due to CUDA or numerical issues.
+            rank (Optional[int]): Truncate SVD to this rank for low-rank approximation.
         """
         logger.info(f"Fitting RidgeRegressor on data: x shape {x.shape}, y shape {y.shape}")
 
@@ -405,19 +435,14 @@ class RidgeRegressor(nn.Module):
 
     def forward(self, x):
         """
-        Perform a forward pass using the fitted Ridge regression model.
-        
-        Predicts outputs using the learned weights (and optional intercept).
-        Input is flattened to 2D if needed.
-        
+        Predict using the fitted Ridge model.
+
         Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, *) or (batch_size, features).
-        
+            x (torch.Tensor): Input tensor, shape (batch_size, seq_len, input_channels)
+                or (batch_size, features).
+
         Returns:
-            torch.Tensor: Predicted values of shape (batch_size, output_dim).
-        
-        Raises:
-            RuntimeError: If called before the model has been fitted using `.fit()`.
+            torch.Tensor: Predicted values, shape (batch_size, output_seq_len) or (batch_size,).
         """
         logger.debug(f"RidgeRegressor forward pass with input shape: {x.shape}")
 
@@ -577,21 +602,26 @@ class MetaPriceRegressor(nn.Module):
 
 class FocalLoss(nn.Module):
     """
-    Focal loss with class-balancing using effective number of samples.
+    Focal loss for class-imbalanced classification.
 
-    This loss reduces the relative loss for well-classified examples and focuses
-    training on the hard examples. It also supports class imbalance via adaptive
-    weighting.
+    Reduces loss for well-classified examples and focuses on hard examples using
+    effective sample weighting to handle class imbalance.
 
     Args:
         num_classes (int): Number of output classes.
-        class_counts (torch.Tensor, optional): Raw class counts used to compute
-            balancing weights.
+        class_counts (torch.Tensor, optional): Raw class counts for balancing weights.
+            If None, assumes uniform weights. Default: None.
         gamma (float): Focusing parameter (default: 1.5).
-        beta (float): Beta parameter for effective number calculation
-            (default: 0.9999).
-        reduction (str): Reduction method: 'mean', 'sum', or 'none'.
-        eps (float): Small epsilon for numerical stability.
+        beta (float): Parameter for effective number calculation (default: 0.9999).
+        reduction (str): Reduction method: 'mean', 'sum', or 'none' (default: 'mean').
+        eps (float): Small value for numerical stability (default: 1e-8).
+
+    Attributes:
+        alpha (torch.Tensor): Class weights based on effective number of samples.
+        gamma (float): Focusing parameter.
+        reduction (str): Reduction method.
+        num_classes (int): Number of classes.
+        eps (float): Numerical stability constant.
     """
     def __init__(self, num_classes: int, class_counts: torch.Tensor = None,
                     gamma: float = 1.5, beta: float = 0.9999,
@@ -639,16 +669,16 @@ class FocalLoss(nn.Module):
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Compute focal loss with balanced weights.
-        
+
         Args:
-            inputs (torch.Tensor): Raw logits of shape (batch_size, num_classes).
-            targets (torch.Tensor): Ground truth labels of shape (batch_size,).
-        
+            inputs (torch.Tensor): Raw logits of shape
+            (batch_size, num_classes).
+            targets (torch.Tensor): Ground truth labels of shape
+            (batch_size,).
+
         Returns:
-            torch.Tensor: Computed focal loss based on reduction type.
-        
-        Raises:
-        ValueError: If input shapes or target ranges are invalid.
+            torch.Tensor: Focal loss. Scalar if reduction is 'mean' or 'sum',
+            otherwise returns per-sample loss of shape (batch_size,).
         """
         # Validate inputs
         if inputs.dim() != 2 or inputs.size(1) != self.num_classes:
@@ -819,26 +849,37 @@ class DirectionalAccuracy(Metric):
 
 class EnsembleModule(L.LightningModule):
     """
-    A PyTorch Lightning module that ensembles CNN, Ridge, and LSTM models.
-    
-    Combines a multi-head 1D CNN, a Ridge regressor, and a bidirectional LSTM
-    for price regression and direction classification. Supports optional
-    meta-learning for price prediction and custom losses (Focal, Orthogonal).
-    
+    PyTorch Lightning module for ensembling CNN, Ridge, and LSTM models.
+
+    Combines a multi-head 1D CNN, Ridge regression, and bidirectional LSTM for
+    price regression and direction classification, with optional meta-learning
+    and custom losses for class imbalance and feature orthogonality.
+
+    Args:
+        cfg (DictConfig): Configuration with model and optimizer parameters.
+
     Attributes:
-        cfg (DictConfig): Model and optimizer configuration.
-        use_meta_learning (bool): Whether meta-learning is enabled.
-        include_base_losses (bool): Whether to include base model losses.
-        price_criterion (nn.Module): Loss for price regression.
-        direction_criterion (nn.Module): Loss for direction classification.
-        orthogonal_loss (nn.Module): Penalty enforcing feature orthogonality.
-        ridge_fitted (bool): Flag set when Ridge model has been fitted.
-        class_counts (torch.Tensor): Label frequencies for class balancing.
-        cnn (MultiHeadCNN): CNN for feature extraction and prediction.
-        ridge (RidgeRegressor): Ridge regressor for linear corrections.
-        lstm (LSTMClassifier): LSTM classifier for direction.
-        meta_price (MetaPriceRegressor): Meta-learner for price (optional).
-        num_classes (int): Number of direction classes.
+        Models:
+            cnn (MultiHeadCNN): CNN for feature extraction and prediction.
+            ridge (RidgeRegressor): Ridge regressor for linear corrections.
+            lstm (LSTMClassifier): LSTM for direction classification.
+            meta_price (MetaPriceRegressor): Optional meta-learner for price.
+        Losses:
+            price_criterion (nn.Module): Huber loss for price regression.
+            direction_criterion (FocalLoss): Focal loss for direction classification.
+            orthogonal_loss (OrthogonalLoss): Penalty for feature orthogonality.
+        Metrics:
+            mae_train (MeanAbsoluteError): Training MAE metric.
+            wmape_train (WeightedMeanAbsolutePercentageError): Training WMAPE metric.
+            r2_train (R2Score): Training R² metric.
+            dir_acc_train (DirectionalAccuracy): Training direction accuracy metric.
+            mae_val, wmape_val, r2_val, dir_acc_val: Validation metrics.
+        Configuration:
+            cfg (DictConfig): Model configuration.
+            use_meta_learning (bool): Whether meta-learning is enabled.
+            include_base_losses (bool): Whether to include base model losses.
+            ridge_fitted (bool): Whether Ridge model is fitted.
+            class_counts (torch.Tensor): Class frequencies for Focal Loss.
     """
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing EnsembleModule with config: {cfg.model}")
@@ -903,21 +944,15 @@ class EnsembleModule(L.LightningModule):
 
     def build_meta_features(self, x, cnn_price, cnn_dir_logits):
         """
-        Construct meta-features for price meta-learner from base outputs.
-        
-        Generates features including CNN and Ridge predictions,
-        direction entropy, model disagreement, and directional signals.
-        
+        Construct meta-features for price meta-learner.
+
         Args:
-            x (torch.Tensor): Input, shape (batch, seq_len, input_channels).
-            cnn_price (torch.Tensor): CNN price preds,
-            shape (batch, output_seq_len).
-            cnn_dir_logits (torch.Tensor): CNN direction logits,
-            shape (batch, num_classes).
-        
+            x (torch.Tensor): Input features, shape (batch_size, seq_len, input_channels).
+            cnn_price (torch.Tensor): CNN price predictions, shape (batch_size, output_seq_len).
+            cnn_dir_logits (torch.Tensor): CNN direction logits, shape (batch_size, num_classes).
+
         Returns:
-            torch.Tensor: Meta-features for price regression,
-            shape (batch, 9).
+            torch.Tensor: Meta-features, shape (batch_size, 9).
         """
         batch_size = cnn_price.shape[0]
         device = cnn_price.device
@@ -986,28 +1021,25 @@ class EnsembleModule(L.LightningModule):
 
     def forward(self, *args, **kwargs):
         """
-        Perform forward pass of the ensemble module.
-        
-        Combines base model predictions (CNN, Ridge, LSTM) or uses a
-        meta-learner for price prediction when enabled. Returns price
-        predictions, direction logits, and feature embeddings.
-        
+        Forward pass of the ensemble module.
+
         Args:
             x (torch.Tensor): Input features with shape
             (batch_size, seq_len, input_channels).
-        
+
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            - final_price: Final price prediction with shape
-                (batch_size, output_seq_len).
-            - final_direction: Direction logits with shape
-                (batch_size, num_classes).
-            - price_features: Price feature embeddings with shape
-                (batch_size, feature_dim, seq_len).
-            - direction_features: Direction feature embeddings with shape
-                (batch_size, feature_dim, seq_len).
+            - final_price: Price predictions with shape:
+              (batch_size, output_seq_len).
+            - final_direction: Direction logits with shape:
+              (batch_size, num_classes).
+            - price_features: Price feature embeddings with shape:
+              (batch_size, channels, seq_len).
+            - direction_features: Direction feature embeddings with shape:
+              (batch_size, channels, seq_len).
         """
         x = args[0]
+        _unused = kwargs
         logger.debug(f"EnsembleModule forward pass with input shape: {x.shape}")
 
         cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
