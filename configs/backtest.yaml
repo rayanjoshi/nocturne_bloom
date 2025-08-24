@@ -17,5 +17,5 @@ features:
 
 backtest:
   predictions_save_path: data/predictions/nvda_predictions.csv
-  starting_cash: 1000000
+  starting_cash: 10000000
   commission: 0.001

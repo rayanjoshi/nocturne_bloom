@@ -442,12 +442,13 @@ class StrategySimulation(bt.Strategy):
         params (dict): Strategy parameters (threshold, size).
     """
     params = dict(
-        vol_window=20,
-        k=1.4,
-        base_size=100,
-        stop_loss=0.03,
-        take_profit=0.06,
-        max_hold=5
+        vol_window=19,     # lookback for volatility
+        k=1.4,             # threshold multiplier
+        base_size=100,     # base position size
+        stop_loss=0.03,    # stop loss
+        take_profit=0.1,  # take profit
+        max_hold=10,        # max bars to hold
+        max_size=500       # maximum position size
     )
 
     def __init__(self, predictions, close_prices, dates=None):
@@ -462,19 +463,20 @@ class StrategySimulation(bt.Strategy):
         self.hold_counter = 0
         self.data.close = self.datas[0].close
         self.returns = pd.Series(close_prices).pct_change()
-        self.logger = get_logger("VolAdjPredictionStrategy")
+        self.logger = get_logger("StrategySimulation")
 
     def log(self, txt, dt=None):
         """
-        Log a message with an associated date.
+        Log a message with a specified or derived date.
 
-    Args:
-        txt (str): The message to be logged.
-        dt (datetime.date, optional): The date to associate with the log message.
-            If None, attempts to use the date from self.dates at the current index,
-            or falls back to the date from self.datas[0].datetime.date(0).
-
-    """
+        Parameters
+        ----------
+        txt : str
+            The message to be logged.
+        dt : datetime.date, optional
+            The date to associate with the log message. If None, derives the date
+            from self.dates or the first data's datetime.
+        """
         idx = len(self)
         if self.dates is not None and idx < len(self.dates):
             dt = pd.to_datetime(self.dates[idx]).date()
@@ -511,12 +513,12 @@ class StrategySimulation(bt.Strategy):
 
         # Entry logic
         if predicted_return > self.p.k * sigma:
-            size = int((predicted_return / sigma) * self.p.base_size)
+            size = int(min((predicted_return / sigma) * self.p.base_size, self.p.max_size))
             self.log(f"BUY, {current_close:.2f}, PredRet={predicted_return:.2%}")
             self.buy(size=max(1, size))
             self.bar_executed = idx
         elif predicted_return < -self.p.k * sigma:
-            size = int((abs(predicted_return) / sigma) * self.p.base_size)
+            size = int(min((abs(predicted_return) / sigma) * self.p.base_size, self.p.max_size))
             self.log(f"SELL, {current_close:.2f}, PredRet={predicted_return:.2%}")
             self.sell(size=max(1, size))
             self.bar_executed = idx
