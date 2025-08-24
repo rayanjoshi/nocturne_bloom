@@ -1,3 +1,5 @@
+defaults:
+  - data_module
 model:
   target_sequence_length: 1  # Predicting the next closing price
   huber_delta: 0.11443956856559279  # Delta for Huber loss, can be adjusted based on the dataset
