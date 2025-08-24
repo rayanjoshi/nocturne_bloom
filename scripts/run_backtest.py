@@ -391,10 +391,16 @@ class TradingSimulation:
             """
             def __init__(self):
                 super().__init__()
-                self.strategy = None
                 self.values = []
+
             def next(self):
-                self.values.append(self.strategy.broker.getvalue())
+                strat = getattr(self, 'strategy', None) or getattr(self, '_owner', None)
+                if strat is None:
+                    return
+                broker = getattr(strat, 'broker', None)
+                if broker is None:
+                    return
+                self.values.append(broker.getvalue())
         cerebro.addanalyzer(ValueTracker, _name='valtracker')
         results = cerebro.run()
         self.logger.info(f"Ending Portfolio Value: {cerebro.broker.getvalue():.2f}")
