@@ -31,17 +31,19 @@ Dependencies:
     - torch: Core PyTorch library for tensor operations.
     - torch.nn: Neural network modules.
     - torch.nn.functional: Functional operations for neural networks.
-    - torchmetrics: Metrics for evaluation (MAE, MAPE, R2).
+    - torchmetrics: Metrics for evaluation (MAE, WWMAPE, R2).
     - lightning: PyTorch Lightning for scalable training.
     - omegaconf: For configuration management.
     - scripts.logging_config: Custom logging utilities.
 """
 from pathlib import Path
+import joblib
+import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torchmetrics import MeanAbsoluteError, Metric
-from torchmetrics.regression import R2Score, MeanAbsolutePercentageError
+from torchmetrics.regression import R2Score, WeightedMeanAbsolutePercentageError
 import lightning as L
 from omegaconf import DictConfig
 from scripts.logging_config import get_logger, setup_logging
@@ -263,6 +265,7 @@ class RidgeRegressor(nn.Module):
             f"fit_intercept={cfg.ridge.fit_intercept}"
         )
         super().__init__()
+        self.cfg = cfg
         self.alpha = cfg.ridge.alpha
         self.fit_intercept = cfg.ridge.fit_intercept
         self.eps = cfg.ridge.eps
@@ -388,7 +391,14 @@ class RidgeRegressor(nn.Module):
         with torch.no_grad():
             y_pred = torch.mm(x_with_intercept, theta)  # [batch_size, output_dim]
             mae = torch.mean(torch.abs(y_pred - y))
-            logger.info(f"Training MAE after fitting: {mae:.4f}")
+            script_dir = Path(__file__).parent
+            repo_root = script_dir.parent
+            scaled_rel_path = Path(self.cfg.data_module.price_y_scaled_save_path)
+            scaler_path = (repo_root / scaled_rel_path).resolve()
+            target_scaler = joblib.load(scaler_path)
+            mae_np = np.array([[mae]])
+            mae = target_scaler.inverse_transform(mae_np)[0, 0]
+            logger.info(f"Training MAE after fitting: ${mae:.2f}")
 
         self.is_fitted = True
 
@@ -882,10 +892,10 @@ class EnsembleModule(L.LightningModule):
     def _setup_metrics(self):
         # Price Metrics
         self.mae_train = MeanAbsoluteError()
-        self.mape_train = MeanAbsolutePercentageError()
+        self.wmape_train = WeightedMeanAbsolutePercentageError()
         self.r2_train = R2Score()
         self.mae_val = MeanAbsoluteError()
-        self.mape_val = MeanAbsolutePercentageError()
+        self.wmape_val = WeightedMeanAbsolutePercentageError()
         self.r2_val = R2Score()
         # Direction Metrics
         self.dir_acc_train = DirectionalAccuracy()
@@ -1148,7 +1158,7 @@ class EnsembleModule(L.LightningModule):
 
         # Update metrics
         self.mae_train.update(price_pred, price_y)
-        self.mape_train.update(price_pred, price_y)
+        self.wmape_train.update(price_pred, price_y)
         self.r2_train.update(price_pred, price_y)
         self.dir_acc_train.update(price_pred, price_y)
 
@@ -1203,7 +1213,7 @@ class EnsembleModule(L.LightningModule):
 
         # Update metrics
         self.mae_val.update(price_pred, price_y)
-        self.mape_val.update(price_pred, price_y)
+        self.wmape_val.update(price_pred, price_y)
         self.r2_val.update(price_pred, price_y)
         self.dir_acc_val.update(price_pred, price_y)
 
@@ -1226,26 +1236,34 @@ class EnsembleModule(L.LightningModule):
         logger.info("Training epoch ended. Computing training metrics.")
 
         price_mae = self.mae_train.compute()
-        price_mape = self.mape_train.compute()
+        price_wmape = self.wmape_train.compute()
         price_r2 = self.r2_train.compute()
         dir_acc = self.dir_acc_train.compute()
 
+        script_dir = Path(__file__).parent
+        repo_root = script_dir.parent
+        scaler_path = (repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)).resolve()
+        target_scaler = joblib.load(scaler_path)
+        price_mae_np = np.array([[price_mae]])
+        price_mae = target_scaler.inverse_transform(price_mae_np)[0, 0]
+        price_wmape = price_wmape * 100
+
         self.log('train_price_mae', price_mae, prog_bar=True)
-        self.log('train_price_mape', price_mape, prog_bar=True)
+        self.log('train_price_wmape', price_wmape, prog_bar=True)
         self.log('train_price_r2', price_r2, prog_bar=True)
         self.log('train_dir_acc', dir_acc, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Training Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: {price_mae:.4f}, MAPE: {price_mape:.4f}, R²: {price_r2:.4f}")
+        logger.info(f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}")
         logger.info(f"Direction - Accuracy: {dir_acc:.4f}")
         logger.info(f"Models Fitted - Ridge: {self.ridge_fitted}")
         logger.info("--------- Training Complete ---------\n")
 
         # Reset metrics
         self.mae_train.reset()
-        self.mape_train.reset()
+        self.wmape_train.reset()
         self.r2_train.reset()
         self.dir_acc_train.reset()
 
@@ -1258,25 +1276,33 @@ class EnsembleModule(L.LightningModule):
         logger.info("Validation epoch ended. Computing validation metrics.")
 
         price_mae = self.mae_val.compute()
-        price_mape = self.mape_val.compute()
+        price_wmape = self.wmape_val.compute()
         price_r2 = self.r2_val.compute()
         dir_acc = self.dir_acc_val.compute()
 
+        script_dir = Path(__file__).parent
+        repo_root = script_dir.parent
+        scaler_path = (repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)).resolve()
+        target_scaler = joblib.load(scaler_path)
+        price_mae_np = np.array([[price_mae]])
+        price_mae = target_scaler.inverse_transform(price_mae_np)[0, 0]
+        price_wmape = price_wmape * 100
+
         self.log('val_price_mae', price_mae, prog_bar=True)
-        self.log('val_price_mape', price_mape, prog_bar=True)
+        self.log('val_price_wmape', price_wmape, prog_bar=True)
         self.log('val_price_r2', price_r2, prog_bar=True)
         self.log('val_dir_acc', dir_acc, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Validation Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: {price_mae:.4f}, MAPE: {price_mape:.4f}, R²: {price_r2:.4f}")
+        logger.info(f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}")
         logger.info(f"Direction - Accuracy: {dir_acc:.4f}")
         logger.info("--------- Validation Complete ---------\n")
 
         # Reset metrics
         self.mae_val.reset()
-        self.mape_val.reset()
+        self.wmape_val.reset()
         self.r2_val.reset()
         self.dir_acc_val.reset()
 
@@ -1294,7 +1320,7 @@ class EnsembleModule(L.LightningModule):
         batch = args[0]
         batch_idx = args[1]
 
-        logger.debug("Test step: batch_idx=%d", batch_idx)
+        logger.debug(f"Test step: batch_idx={batch_idx}")
         return self.validation_step(batch, batch_idx)
 
     def on_test_epoch_end(self):
@@ -1306,22 +1332,30 @@ class EnsembleModule(L.LightningModule):
         logger.info("Test epoch ended. Computing test metrics.")
 
         price_mae = self.mae_val.compute()
-        price_mape = self.mape_val.compute()
+        price_wmape = self.wmape_val.compute()
         price_r2 = self.r2_val.compute()
 
+        script_dir = Path(__file__).parent
+        repo_root = script_dir.parent
+        scaler_path = (repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)).resolve()
+        target_scaler = joblib.load(scaler_path)
+        price_mae_np = np.array([[price_mae]])
+        price_mae = target_scaler.inverse_transform(price_mae_np)[0, 0]
+        price_wmape = price_wmape * 100
+
         self.log('test_price_mae', price_mae, prog_bar=True)
-        self.log('test_price_mape', price_mape, prog_bar=True)
+        self.log('test_price_wmape', price_wmape, prog_bar=True)
         self.log('test_price_r2', price_r2, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Test Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: {price_mae:.4f}, MAPE: {price_mape:.4f}, R²: {price_r2:.4f}")
+        logger.info(f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}")
         logger.info("--------- Test Complete ---------\n")
 
         # Reset metrics
         self.mae_val.reset()
-        self.mape_val.reset()
+        self.wmape_val.reset()
         self.r2_val.reset()
         self.dir_acc_val.reset()
 
