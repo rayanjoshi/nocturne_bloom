@@ -379,12 +379,15 @@ class TradingSimulation:
 
         cerebro.adddata(data)
 
-        cerebro.broker.setcash(1000000.00)
-        cerebro.broker.setcommission(commission=0.001)
+        cerebro.broker.setcash(self.cfg.backtest.starting_cash)
+        cerebro.broker.setcommission(commission=self.cfg.backtest.commission)
 
-        self.logger.info(f"Starting Portfolio Value: {cerebro.broker.getvalue():.2f}")
+        starting_value = cerebro.broker.getvalue()
+
+        self.logger.info(f"Starting Portfolio Value: {starting_value:.2f}")
         # Track portfolio value after each bar
         portfolio_values = []
+
         class ValueTracker(bt.Analyzer):
             """
             Custom analyzer to track portfolio values.
@@ -403,6 +406,7 @@ class TradingSimulation:
                 self.values.append(broker.getvalue())
         cerebro.addanalyzer(ValueTracker, _name='valtracker')
         results = cerebro.run()
+        self.logger.info(f"Starting Portfolio Value: {starting_value:.2f}")
         self.logger.info(f"Ending Portfolio Value: {cerebro.broker.getvalue():.2f}")
 
         # Get portfolio values from analyzer
@@ -413,10 +417,17 @@ class TradingSimulation:
             returns = pd.Series(portfolio_values).pct_change().dropna()
             sharpe = qs.stats.sharpe(returns)
             self.logger.info(f"QuantStats Sharpe Ratio: {sharpe:.4f}")
+            sortino = qs.stats.sortino(returns)
+            self.logger.info(f"QuantStats Sortino Ratio: {sortino:.4f}")
+            max_drawdown = qs.stats.max_drawdown(returns)
+            self.logger.info(f"QuantStats Max Drawdown: {max_drawdown * 100:.2f}%")
+            annual_return = qs.stats.cagr(returns)
+            self.logger.info(f"QuantStats Annual Return: {annual_return * 100:.2f}%")
+            win_rate = qs.stats.win_rate(returns)
+            self.logger.info(f"QuantStats Win Rate: {win_rate * 100:.2f}%")
 
-            # ...removed matplotlib and seaborn plotting code...
         else:
-            self.logger.warning("Not enough data to calculate Sharpe ratio.")
+            self.logger.warning("Not enough data to calculate metrics.")
 
 class StrategySimulation(bt.Strategy):
     """
@@ -430,29 +441,40 @@ class StrategySimulation(bt.Strategy):
     Attributes:
         params (dict): Strategy parameters (threshold, size).
     """
-    params = dict(threshold=0.01, size=100)
+    params = dict(
+        vol_window=20,
+        k=1.4,
+        base_size=100,
+        stop_loss=0.03,
+        take_profit=0.06,
+        max_hold=5
+    )
 
     def __init__(self, predictions, close_prices, dates=None):
         super().__init__()
         self.predictions = predictions
         self.close_prices = close_prices
         self.dates = dates
-        self.order = None
-        # Initialize attributes that will be assigned later to avoid defining them outside __init__
         self.buyprice = None
         self.buycomm = None
+        self.order = None
         self.bar_executed = None
+        self.hold_counter = 0
         self.data.close = self.datas[0].close
-        self.logger = get_logger("StrategySimulation")
+        self.returns = pd.Series(close_prices).pct_change()
+        self.logger = get_logger("VolAdjPredictionStrategy")
 
     def log(self, txt, dt=None):
         """
-        Logs a message with an optional timestamp.
+        Log a message with an associated date.
 
-        Args:
-            txt (str): Message to log.
-            dt (datetime, optional): Timestamp for the log. Defaults to None.
-        """
+    Args:
+        txt (str): The message to be logged.
+        dt (datetime.date, optional): The date to associate with the log message.
+            If None, attempts to use the date from self.dates at the current index,
+            or falls back to the date from self.datas[0].datetime.date(0).
+
+    """
         idx = len(self)
         if self.dates is not None and idx < len(self.dates):
             dt = pd.to_datetime(self.dates[idx]).date()
@@ -461,35 +483,43 @@ class StrategySimulation(bt.Strategy):
         self.logger.info(f"{dt.isoformat()} {txt}")
 
     def next(self):
-        """
-        Executes the trading logic for each bar.
-        """
         idx = len(self)
-        if idx >= len(self.predictions):
-            return  # Avoid index error if predictions are shorter than data
+        if idx >= len(self.predictions) or idx < self.p.vol_window:
+            return
+
         current_close = self.close_prices[idx]
         predicted_close = self.predictions[idx]
         if np.isnan(predicted_close) or np.isnan(current_close):
             return
+
         predicted_return = (predicted_close - current_close) / current_close
-        self.log(f"Close, {current_close:.2f} | Predicted, {predicted_close:.2f}")
+        sigma = self.returns.iloc[idx - self.p.vol_window:idx].std()
 
-        # Close any open position
+        # Exit logic
         if self.position:
-            if (self.position.size > 0 and predicted_return < self.p.threshold) or \
-                (self.position.size < 0 and predicted_return > -self.p.threshold):
-                self.log(f'CLOSE POSITION, {current_close:.2f}')
-                self.order = self.close()
+            self.hold_counter += 1
+            pnl = (current_close - self.position.price) / self.position.price
+            if (self.position.size > 0 and (
+                pnl <= -self.p.stop_loss or pnl >= self.p.take_profit
+            )) or (self.position.size < 0 and (
+                pnl >= self.p.stop_loss or pnl <= -self.p.take_profit
+            )) or self.hold_counter >= self.p.max_hold:
+                self.log(f"CLOSE, {current_close:.2f}, PnL={pnl:.2%}")
+                self.close()
+                self.hold_counter = 0
+            return
 
-        # Long signal
-        elif predicted_return > self.p.threshold:
-            self.log(f'BUY CREATE, {current_close:.2f}')
-            self.order = self.buy(size=self.p.size)
-
-        # Short signal
-        elif predicted_return < -self.p.threshold:
-            self.log(f'SELL CREATE, {current_close:.2f}')
-            self.order = self.sell(size=self.p.size)
+        # Entry logic
+        if predicted_return > self.p.k * sigma:
+            size = int((predicted_return / sigma) * self.p.base_size)
+            self.log(f"BUY, {current_close:.2f}, PredRet={predicted_return:.2%}")
+            self.buy(size=max(1, size))
+            self.bar_executed = idx
+        elif predicted_return < -self.p.k * sigma:
+            size = int((abs(predicted_return) / sigma) * self.p.base_size)
+            self.log(f"SELL, {current_close:.2f}, PredRet={predicted_return:.2%}")
+            self.sell(size=max(1, size))
+            self.bar_executed = idx
 
     def notify_order(self, order):
         """
