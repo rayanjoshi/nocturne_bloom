@@ -213,7 +213,7 @@ def optuna_search_space(trial):
             "focal_gamma", 0.5, 5.0, step=0.1
         ),
         "focal_alpha": trial.suggest_float(
-            "focal_alpha", 0.0, 1.0, step=0.01
+            "focal_alpha", 0.1, 0.75, step=0.05
         ),
         "focal_beta": trial.suggest_float(
             "focal_beta", 0.9, 0.9999, step=0.001
@@ -356,7 +356,7 @@ def get_ray_tune_search_space():
 
         # Focal loss parameters - important for class imbalance
         "focal_gamma": tune.uniform(0.5, 5.0),
-        "focal_alpha": tune.uniform( 0.0, 1.0),
+        "focal_alpha": tune.uniform( 0.1, 0.75),
         "focal_beta": tune.uniform(0.9, 0.9999),
 
         # Optimizer parameters - comprehensive tuning
@@ -440,13 +440,13 @@ def update_config_from_trial_params(
     cfg_dict["cnn"]["outputSize"] = trial_params.get("output_size", 1)
 
     # Update Ridge parameters
-    cfg_dict["Ridge"]["alpha"] = trial_params["ridge_alpha"]
-    cfg_dict["Ridge"]["eps"] = trial_params.get("ridge_eps", 1e-8)
+    cfg_dict["ridge"]["alpha"] = trial_params["ridge_alpha"]
+    cfg_dict["ridge"]["eps"] = trial_params.get("ridge_eps", 1e-8)
 
     # Update LSTM parameters
-    cfg_dict["LSTM"]["hidden_size"] = trial_params.get("lstm_hidden_size", 128)
-    cfg_dict["LSTM"]["num_layers"] = trial_params.get("lstm_num_layers", 2)
-    cfg_dict["LSTM"]["dropout"] = trial_params.get("lstm_dropout", 0.3)
+    cfg_dict["lstm"]["hidden_size"] = trial_params.get("lstm_hidden_size", 128)
+    cfg_dict["lstm"]["num_layers"] = trial_params.get("lstm_num_layers", 2)
+    cfg_dict["lstm"]["dropout"] = trial_params.get("lstm_dropout", 0.3)
 
     # Normalize and update ensemble weights
     price_cnn_w = trial_params["price_cnn_weight"]
@@ -589,7 +589,7 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
         try:
             # Initialize model and data
             torch.manual_seed(cfg.trainer.seed)
-            logger.debug("Seed set to %d", cfg.trainer.seed)
+            logger.debug(f"Seed set to {cfg.trainer.seed}")
             model = EnsembleModule(cfg)
             data_module = StockDataModule(cfg)
 
@@ -601,14 +601,14 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
 
             if val_results and len(val_results) > 0:
                 val_mae = val_results[0].get("val_price_mae", float('inf'))
-                val_direction_acc = val_results[0].get("val_direction_acc", 0.0)
+                val_direction_acc = val_results[0].get("dir_acc_val", 0.0)
                 val_r2 = val_results[0].get("val_price_r2", -float('inf'))
                 val_loss = val_results[0].get("val_loss", float('inf'))
 
                 # Calculate multi-objective score
                 metric_calculator = MultiObjectiveMetric(
-                    mae_weight=0.4,
-                    acc_weight=0.6,
+                    mae_weight=0.7,
+                    acc_weight=0.3,
                     mae_scale=1.0,
                 )
                 multi_objective_score = metric_calculator(val_mae, val_direction_acc)
