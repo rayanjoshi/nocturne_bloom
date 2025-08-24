@@ -445,11 +445,11 @@ class StrategySimulation(bt.Strategy):
     params = dict(
         vol_window=19,     # lookback for volatility
         k=1.4,             # threshold multiplier
-        base_size=200,     # base position size
+        base_size=500,     # base position size
         stop_loss=0.03,    # stop loss
         take_profit=0.1,  # take profit
         max_hold=10,        # max bars to hold
-        max_size=1000,      # maximum position size
+        max_size=5000,      # maximum position size
         trend_window=30      # lookback for trend
     )
 
@@ -464,9 +464,25 @@ class StrategySimulation(bt.Strategy):
         self.order = None
         self.bar_executed = None
         self.hold_counter = 0
+        self.recent_trades = []
         self.data.close = self.datas[0].close
         self.returns = pd.Series(close_prices).pct_change()
         self.logger = get_logger("StrategySimulation")
+
+    def update_recent_performance(self, pnl):
+        """
+        Update the record of recent trading performance.
+
+        Append a binary outcome (1 for profit, 0 for loss) to the recent_trades list
+        based on the provided profit and loss (pnl) value. Maintain a maximum of 20
+        recent trades by removing the oldest entry when the list exceeds this limit.
+
+        Args:
+            pnl (float): The profit and loss value of the trade.
+        """
+        self.recent_trades.append(1 if pnl > 0 else 0)
+        if len(self.recent_trades) > 20:
+            self.recent_trades.pop(0)
 
     def log(self, txt, dt=None):
         """
@@ -509,11 +525,12 @@ class StrategySimulation(bt.Strategy):
         predicted_return = (predicted_close - current_close) / current_close
         sigma = self.returns.iloc[idx - self.p.vol_window:idx].std()
 
-        # Ensure is_uptrend is always defined to avoid use-before-assignment
         is_uptrend = False
         if len(self.close_prices) > self.p.trend_window:
             sma_50 = np.mean(self.close_prices[idx-self.p.trend_window:idx])
             is_uptrend = current_close > sma_50
+        recent_returns = self.returns.iloc[idx-3:idx].mean()
+
 
         # Exit logic
         if self.position:
@@ -529,27 +546,45 @@ class StrategySimulation(bt.Strategy):
                 self.hold_counter = 0
             return
 
-# Combine regime detection with slightly looser momentum filter
+        # Entry logic
         if abs(predicted_return) > self.p.k * sigma:
-            # Regime detection (from 2C)
-            if len(self.close_prices) > self.p.trend_window:
-                sma_50 = np.mean(self.close_prices[idx-self.p.trend_window:idx])
-                is_uptrend = current_close > sma_50
+            # Long trades: uptrend + positive prediction + not strongly negative momentum
+            if predicted_return > 0 and is_uptrend and recent_returns > -0.01:
+                confidence = predicted_return / (self.p.k * sigma)
+                recent_window = self.recent_trades[-10:]
+                if recent_window:
+                    recent_win_rate = sum(recent_window) / len(recent_window)
+                else:
+                    recent_win_rate = 0.5
 
-                # Looser momentum filter (3-day instead of 5-day)
-                recent_returns = self.returns.iloc[idx-3:idx].mean()
+                if recent_win_rate > 0.6:
+                    size_multiplier = 1.5
+                elif recent_win_rate < 0.3:
+                    size_multiplier = 0.7
+                else:
+                    size_multiplier = 1.0
 
-                # Long trades: uptrend + positive prediction + not strongly negative momentum
-                if predicted_return > 0 and is_uptrend and recent_returns > -0.01:
-                    confidence = predicted_return / (self.p.k * sigma)
-                    size = int(min(confidence * self.p.base_size * 2, self.p.max_size))
-                    self.buy(size=max(1, size))
+                size = int(min(confidence * self.p.base_size * size_multiplier, self.p.max_size))
+                self.buy(size=max(1, size))
 
-                # Short trades: downtrend + negative prediction + not strongly positive momentum
-                elif predicted_return < 0 and not is_uptrend and recent_returns < 0.01:
-                    confidence = abs(predicted_return) / (self.p.k * sigma)
-                    size = int(min(confidence * self.p.base_size * 2, self.p.max_size))
-                    self.sell(size=max(1, size))
+            # Short trades: downtrend + negative prediction + not strongly positive momentum
+            elif predicted_return < 0 and not is_uptrend and recent_returns < 0.01:
+                confidence = abs(predicted_return) / (self.p.k * sigma)
+                recent_window = self.recent_trades[-10:]
+                if recent_window:
+                    recent_win_rate = sum(recent_window) / len(recent_window)
+                else:
+                    recent_win_rate = 0.5
+
+                if recent_win_rate > 0.6:
+                    size_multiplier = 1.5
+                elif recent_win_rate < 0.3:
+                    size_multiplier = 0.7
+                else:
+                    size_multiplier = 1.0
+
+                size = int(min(confidence * self.p.base_size * size_multiplier, self.p.max_size))
+                self.sell(size=max(1, size))
 
     def notify_order(self, order):
         """
