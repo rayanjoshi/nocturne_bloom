@@ -7,11 +7,12 @@ __pycache__/
 /data/preprocessing/*
 /data/raw/*
 /data/processed/*
-/models/scaler.pkl
+/models/scalers/*
+/models/*.pth
+/models/*.ckpt
 /src/outputs/
 data/outputs/
 outputs/
 logs/*
-models/*
 *.egg-info
 outputs/
