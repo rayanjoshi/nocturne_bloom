@@ -262,7 +262,7 @@ class MakePredictions:
         with torch.no_grad():
             for xi in x:
                 xi = xi.unsqueeze(0).to(self.device)  # Add batch dimension
-                price_pred, _, _, _ = model(xi)  # Get price predictions only
+                price_pred, _, _, _ = model(xi)  # pylint: disable=not-callable
                 if price_pred.dim() > 1:
                     price_pred = price_pred.squeeze(-1)  # Ensure 1D output
                 predictions.append(price_pred.item())
