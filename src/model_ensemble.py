@@ -303,12 +303,14 @@ class RidgeRegressor(nn.Module):
         self.fit_intercept = cfg.ridge.fit_intercept
         self.eps = cfg.ridge.eps
         self.output_seq_len = cfg.cnn.output_seq_len
+        self.input_dim = self.cfg.cnn.inputChannels * cfg.data_module.window_size
 
-        # Ridge parameters (will be set during fit). Use placeholders so buffers
-        # exist in the module and can be replaced with properly-shaped tensors
-        # when `.fit()` computes the coefficients.
-        self.register_buffer('weight', torch.empty(0))
-        self.register_buffer('bias', torch.tensor(0.0))
+        # Ridge parameters (will be set during fit).
+        self.weight = nn.Parameter(
+            torch.zeros(self.input_dim, self.output_seq_len),
+            requires_grad=False,
+        )
+        self.bias = nn.Parameter(torch.zeros(self.output_seq_len), requires_grad=False)
         self.is_fitted = False
         self.register_buffer('condition_number', torch.tensor(0.0, requires_grad=False))
         self.fallback_count = 0  # Track fallback attempts
@@ -333,7 +335,7 @@ class RidgeRegressor(nn.Module):
 
         # Flatten x to 2D if it's 3D
         if len(x.shape) == 3:
-            x = x.view(x.shape[0], -1)
+            x = x.reshape(x.shape[0], -1)
 
         # Handle y dimensions - flatten if 2D but keep track of output dimension
         output_dim = 1
@@ -410,12 +412,18 @@ class RidgeRegressor(nn.Module):
             logger.warning(f"Large coefficients detected: max |theta| = {torch.abs(theta).max()}")
 
         # Split weight and bias - theta has shape [n_features, output_dim]
-        if self.fit_intercept:
-            self.register_buffer('weight', theta[:-1, :].clone().detach())
-            self.register_buffer('bias', theta[-1, :].clone().detach())
-        else:
-            self.register_buffer('weight', theta.clone().detach())
-            self.register_buffer('bias', torch.zeros(output_dim, device=device))
+        # Assign learned parameters as nn.Parameter (not buffers)
+        with torch.no_grad():
+            if self.fit_intercept:
+                w = theta[:-1, :].clone().detach().to(device)
+                b = theta[-1, :].clone().detach().to(device)
+            else:
+                w = theta.clone().detach().to(device)
+                b = torch.zeros(output_dim, device=device, dtype=w.dtype)
+
+            # Replace placeholders with Parameters (not trainable)
+            self.weight = nn.Parameter(w, requires_grad=False)
+            self.bias = nn.Parameter(b, requires_grad=False)
 
         # Log training MAE
         with torch.no_grad():
@@ -451,7 +459,7 @@ class RidgeRegressor(nn.Module):
 
         # Flatten to 2D if needed
         if len(x.shape) == 3:
-            x = x.view(x.shape[0], -1)
+            x = x.reshape(x.shape[0], -1)
 
         x = x.to(self.weight.device).float()
 
@@ -487,7 +495,7 @@ class LSTMClassifier(nn.Module):
     """
     def __init__(self, cfg: DictConfig):
         logger.info(
-            f"Initializing Improved LSTMClassifier with hidden_size={cfg.lstm.hidden_size}, "
+            f"Initializing LSTMClassifier with hidden_size={cfg.lstm.hidden_size}, "
             f"num_layers={cfg.lstm.num_layers}"
         )
         super().__init__()
