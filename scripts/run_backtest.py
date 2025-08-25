@@ -432,31 +432,27 @@ class TradingSimulation:
 
 class StrategySimulation(bt.Strategy):
     """
-    Enhanced strategy combining the best of both approaches for improved Sharpe ratio.
-    Key improvements over the original:
-    1. Kelly criterion for position sizing
-    2. Volatility-adjusted position sizing
-    3. Dynamic stop losses
-    4. Portfolio heat management
-    5. Better risk controls
+    Backtrader strategy for trading based on model predictions.
+
+    Args:
+        predictions (list): List of predicted prices.
+        close_prices (list): List of actual close prices.
+        dates (list, optional): List of corresponding dates. Defaults to None.
+
+    Attributes:
+        params (dict): Strategy parameters (threshold, size).
     """
     params = dict(
-        vol_window=19,
-        k=1.4,
-        base_size=500,
-        stop_loss=0.03,
-        take_profit=0.1,
+        vol_window=19,     # lookback for volatility
+        k=1.4,             # threshold multiplier
+        base_size=500,     # base position size
+        stop_loss=0.03,    # stop loss
+        take_profit=0.1,  # take profit
         min_hold=1,
-        max_hold=28,
-        max_size=5000,
-        trend_window=30,
-        atr_window=14,
-        kelly_lookback=50,           # Kelly criterion lookback
-        max_portfolio_risk=0.20,     # Max 20% portfolio at risk
-        vol_target=0.02,             # Target daily volatility
-        adaptive_sizing=True,        # Enable adaptive position sizing
-        dynamic_stops=True,          # Enable dynamic stop losses
-        heat_control=True           # Enable portfolio heat control
+        max_hold=28,        # max bars to hold
+        max_size=5000,      # maximum position size
+        trend_window=30,      # lookback for trend
+        atr_window=14,      # ATR window for volatility-adjusted holding period
     )
 
     def __init__(self, cfg: DictConfig, predictions, close_prices, dates=None):
@@ -471,69 +467,10 @@ class StrategySimulation(bt.Strategy):
         self.bar_executed = None
         self.hold_counter = 0
         self.recent_trades = []
-        self.trade_pnls = []  # For Kelly calculation - KEY IMPROVEMENT
         self.data.close = self.datas[0].close
         self.returns = pd.Series(close_prices).pct_change()
-        self.logger = get_logger("StrategyEnhanced")
+        self.logger = get_logger("StrategySimulation")
         self.atr = bt.indicators.ATR(self.datas[0], period=self.p.atr_window)
-
-    def kelly_fraction(self):
-        """
-        Calculate Kelly fraction based on recent trade performance.
-        This is a KEY IMPROVEMENT for position sizing.
-        """
-        if len(self.trade_pnls) < 10:
-            return 0.1  # Conservative default
-        
-        wins = [pnl for pnl in self.trade_pnls if pnl > 0]
-        losses = [pnl for pnl in self.trade_pnls if pnl < 0]
-        
-        if not wins or not losses:
-            return 0.1
-            
-        win_rate = len(wins) / len(self.trade_pnls)
-        avg_win = np.mean(wins)
-        avg_loss = abs(np.mean(losses))
-        
-        if avg_loss == 0:
-            return 0.1
-            
-        kelly = win_rate - (1 - win_rate) * (avg_loss / avg_win)
-        return max(0.01, min(0.25, kelly))  # Cap between 1-25%
-
-    def volatility_adjusted_size(self, base_size, current_vol):
-        """
-        Adjust position size based on current volatility.
-        This helps maintain consistent risk across different market regimes.
-        """
-        if not self.p.adaptive_sizing:
-            return base_size
-            
-        vol_scalar = self.p.vol_target / max(current_vol, 0.005)
-        return int(base_size * np.sqrt(vol_scalar))
-
-    def portfolio_heat(self):
-        """
-        Calculate current portfolio heat (% at risk).
-        Prevents overexposure and improves risk management.
-        """
-        if not self.position:
-            return 0.0
-        
-        position_value = abs(self.position.size * self.data.close[0])
-        portfolio_value = self.broker.getvalue()
-        return position_value / portfolio_value
-
-    def update_recent_performance(self, pnl):
-        """Update the record of recent trading performance."""
-        self.recent_trades.append(1 if pnl > 0 else 0)
-        if len(self.recent_trades) > 20:
-            self.recent_trades.pop(0)
-        
-        # Also update trade PnLs for Kelly calculation
-        self.trade_pnls.append(pnl)
-        if len(self.trade_pnls) > self.p.kelly_lookback:
-            self.trade_pnls.pop(0)
 
     def log(self, txt, dt=None):
         """
@@ -563,132 +500,91 @@ class StrategySimulation(bt.Strategy):
         starting_value = self.cfg.backtest.starting_cash
         current_drawdown = (starting_value - current_value) / starting_value
 
-        # Enhanced heat control
-        if self.p.heat_control and current_drawdown > 0.15:
+        if current_drawdown > 0.15:  # 15% drawdown limit
             self.log(f"Heat control: Drawdown {current_drawdown:.2%}, skipping new entries")
-            return
-
-        # Portfolio risk check - NEW IMPROVEMENT
-        if self.portfolio_heat() > self.p.max_portfolio_risk:
-            self.log(f"Portfolio heat {self.portfolio_heat():.2%} exceeds limit, skipping entry")
             return
 
         current_close = self.close_prices[idx]
         predicted_close = self.predictions[idx]
         self.log(f" ActualClose ={current_close} | Predicted Close ={predicted_close}")
-        
         if np.isnan(predicted_close) or np.isnan(current_close):
             return
 
         predicted_return = (predicted_close - current_close) / current_close
         sigma = self.returns.iloc[idx - self.p.vol_window:idx].std()
-        current_vol = self.returns.iloc[max(0, idx-5):idx].std()  # Short-term volatility
 
-        # Trend detection
         sma_50 = np.mean(self.close_prices[idx-self.p.trend_window:idx])
         is_uptrend = current_close > sma_50
-        
-        # ATR-based dynamic parameters
         atr_value = self.atr[0]
         atr_normalized = atr_value / current_close if current_close != 0 else 0
+
         dynamic_max_hold = self.p.min_hold + int(10 * min(atr_normalized / 0.02, 1.0))
+
         dynamic_take_profit = self.p.take_profit * (1 + atr_normalized / 0.1)
 
-        # Exit logic with improvements
+        # Exit logic
         if self.position:
             self.hold_counter += 1
             pnl = (current_close - self.position.price) / self.position.price
-            
-            # Dynamic stop loss based on volatility - KEY IMPROVEMENT
-            dynamic_stop = self.p.stop_loss
-            if self.p.dynamic_stops:
-                dynamic_stop = max(self.p.stop_loss, current_vol * 2)
-            
             exit_condition = False
             if self.position.size > 0:  # Long position
                 exit_condition = (
-                    pnl <= -dynamic_stop or
+                    pnl <= -self.p.stop_loss or
                     pnl >= dynamic_take_profit or
                     self.hold_counter >= (dynamic_max_hold if is_uptrend else self.p.min_hold)
                 )
             elif self.position.size < 0:  # Short position
                 exit_condition = (
-                    pnl >= dynamic_stop or
+                    pnl >= self.p.stop_loss or
                     pnl <= -dynamic_take_profit or
                     self.hold_counter >= (dynamic_max_hold if not is_uptrend else self.p.min_hold)
                 )
-                
             if exit_condition:
                 self.log(f"CLOSE, {current_close:.2f}, Profit={pnl:.2%}, Hold={self.hold_counter} bars")
-                self.update_recent_performance(pnl)  # Track performance
                 self.close()
                 self.hold_counter = 0
             return
 
-        # Entry logic with enhanced position sizing
+        # Entry logic
         if abs(predicted_return) > self.p.k * sigma:
             recent_returns = self.returns.iloc[idx-3:idx].mean()
-            
-            # Kelly-based sizing - MAJOR IMPROVEMENT
-            kelly = self.kelly_fraction() if self.p.adaptive_sizing else 0.1
-            
-            # Long trades
+            # Long trades: uptrend + positive prediction + not strongly negative momentum
             if predicted_return > 0 and is_uptrend and recent_returns > -0.01:
                 confidence = predicted_return / (self.p.k * sigma)
-                
-                # Enhanced sizing calculation
-                base_size = int(self.p.base_size * kelly * confidence)
-                
-                # Apply volatility adjustment
-                if self.p.adaptive_sizing:
-                    size = self.volatility_adjusted_size(base_size, current_vol)
-                else:
-                    size = base_size
-                
-                # Apply recent performance multiplier (from original strategy)
                 recent_window = self.recent_trades[-10:]
                 if recent_window:
                     recent_win_rate = sum(recent_window) / len(recent_window)
-                    if recent_win_rate > 0.6:
-                        size_multiplier = 1.5  # Less aggressive than original
-                    elif recent_win_rate < 0.3:
-                        size_multiplier = 0.7
-                    else:
-                        size_multiplier = 1.0
-                    size = int(size * size_multiplier)
-                
-                size = min(max(1, size), self.p.max_size)
-                self.buy(size=size)
-                self.log(f"BUY signal: size={size}, kelly={kelly:.3f}, confidence={confidence:.3f}")
+                else:
+                    recent_win_rate = 0.5
 
-            # Short trades
+                if recent_win_rate > 0.6:
+                    size_multiplier = 2
+                elif recent_win_rate < 0.3:
+                    size_multiplier = 0.5
+                else:
+                    size_multiplier = 1.0
+
+                size = int(min(confidence * self.p.base_size * size_multiplier, self.p.max_size))
+                self.buy(size=max(1, size))
+
+            # Short trades: downtrend + negative prediction + not strongly positive momentum
             elif predicted_return < 0 and not is_uptrend and recent_returns < 0.01:
                 confidence = abs(predicted_return) / (self.p.k * sigma)
-                
-                # Enhanced sizing calculation
-                base_size = int(self.p.base_size * kelly * confidence)
-                
-                # Apply volatility adjustment
-                if self.p.adaptive_sizing:
-                    size = self.volatility_adjusted_size(base_size, current_vol)
-                else:
-                    size = base_size
-                
-                # Apply recent performance multiplier
                 recent_window = self.recent_trades[-10:]
                 if recent_window:
                     recent_win_rate = sum(recent_window) / len(recent_window)
-                    if recent_win_rate > 0.6:
-                        size_multiplier = 1.5
-                    elif recent_win_rate < 0.3:
-                        size_multiplier = 0.7
-                    else:
-                        size_multiplier = 1.0
-                    size = int(size * size_multiplier)
-                
-                size = min(max(1, size), self.p.max_size)
-                self.sell(size=size)
-                self.log(f"SELL signal: size={size}, kelly={kelly:.3f}, confidence={confidence:.3f}")
+                else:
+                    recent_win_rate = 0.5
+
+                if recent_win_rate > 0.6:
+                    size_multiplier = 2
+                elif recent_win_rate < 0.3:
+                    size_multiplier = 0.5
+                else:
+                    size_multiplier = 1.0
+
+                size = int(min(confidence * self.p.base_size * size_multiplier, self.p.max_size))
+                self.sell(size=max(1, size))
 
     def notify_order(self, order):
         """
@@ -698,11 +594,8 @@ class StrategySimulation(bt.Strategy):
             order (bt.Order): The order object with status updates.
         """
         if order.status in [order.Submitted, order.Accepted]:
-            # Buy/Sell order submitted/accepted to/by broker - Nothing to do
             return
 
-        # Check if an order has been completed
-        # Attention: broker could reject order if not enough cash
         if order.status in [order.Completed]:
             if order.isbuy():
                 msg = (
