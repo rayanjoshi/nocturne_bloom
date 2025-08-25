@@ -600,8 +600,14 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
             val_results = trainer.validate(model, datamodule=data_module, verbose=False)
 
             if val_results and len(val_results) > 0:
+                # Lightning returns validation metrics with names set in the LightningModule
                 val_mae = val_results[0].get("val_price_mae", float('inf'))
-                val_direction_acc = val_results[0].get("dir_acc_val", 0.0)
+                # Accept multiple possible names for directional accuracy depending on logging
+                dir_acc_val = (
+                    val_results[0].get("val_dir_acc",
+                    val_results[0].get("val_direction_acc",
+                    val_results[0].get("dir_acc_val", 0.0)))
+                )
                 val_r2 = val_results[0].get("val_price_r2", -float('inf'))
                 val_loss = val_results[0].get("val_loss", float('inf'))
 
@@ -611,14 +617,15 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
                     acc_weight=0.3,
                     mae_scale=1.0,
                 )
-                multi_objective_score = metric_calculator(val_mae, val_direction_acc)
+                multi_objective_score = metric_calculator(val_mae, dir_acc_val)
 
-                # Report all metrics
                 metrics = {
                     "val_loss": val_loss,
                     "val_mae": val_mae,
                     "val_r2": val_r2,
-                    "val_direction_acc": val_direction_acc,
+                    "dir_acc_val": dir_acc_val,
+                    "val_dir_acc": dir_acc_val,
+                    "val_direction_acc": dir_acc_val,
                     "multi_objective_score": multi_objective_score,
                     "epoch": trainer.current_epoch
                 }
@@ -628,7 +635,7 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
                     "val_loss": float('inf'),
                     "val_mae": float('inf'),
                     "val_r2": -float('inf'),
-                    "val_direction_acc": 0.0,
+                    "dir_acc_val": 0.0,
                     "multi_objective_score": 0.0,
                     "epoch": 0
                 }
@@ -643,7 +650,7 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
                 "val_loss": float('inf'),
                 "val_mae": float('inf'),
                 "val_r2": -float('inf'),
-                "val_direction_acc": 0.0,
+                "dir_acc_val": 0.0,
                 "multi_objective_score": 0.0,
                 "epoch": 0
             })
@@ -746,7 +753,9 @@ def main(cfg: Optional[DictConfig] = None):
             "val_loss", 
             "val_mae", 
             "val_r2", 
+            # Lightning logs 'val_dir_acc' in the model; keep both visible
             "val_direction_acc",
+            "val_dir_acc",
             "multi_objective_score",
             "epoch"
         ],
