@@ -30,15 +30,15 @@ model:
 
 cnn:
   output_seq_len: 1
-  inputChannels: 119  # Number of features (RSI, MACD, etc.)
-  cnnChannels: [16, 48, 8]  # Reduced capacity to prevent overfitting
-  kernelSize: [5, 7, 2]
-  poolSize: [5, 2, 3]  # Pooling after each CNN layer
-  poolPadding: [0, 0, 0]
+  input_channels: 119  # Number of features (RSI, MACD, etc.)
+  cnn_channels: [16, 48, 8]  # Reduced capacity to prevent overfitting
+  kernel_size: [5, 7, 2]
+  pool_size: [5, 2, 3]  # Pooling after each CNN layer
+  pool_padding: [0, 0, 0]
   padding: [3, 3, 0]  # kernel_size // 2 for each dimension
   stride: 1
   dropout: [0.46432458059315673, 0.10085607878118658]
-  outputSize: 1
+  output_size: 1
   num_classes: 3
 
 ridge:
@@ -55,10 +55,10 @@ optimiser:
   name: 'adam'
   base_lr: 0.001158651470636477
   meta_lr: 0.006783558000782332
-  weightDecay: 4.152785493174216e-07  # L2 regularization term 
+  weight_decay: 4.152785493174216e-07  # L2 regularization term 
   eps: 3.539392686029228e-12
   amsgrad: False  # Whether to use AMSGrad variant of Adam
-  schedulerMode: 'min'
-  schedulerFactor: 0.7428546309727503
-  schedulerPatience: 10
-  schedulerMinLR: 6.926873895072113e-05
+  scheduler_mode: 'min'
+  scheduler_factor: 0.7428546309727503
+  scheduler_patience: 10
+  scheduler_min_lr: 6.926873895072113e-05

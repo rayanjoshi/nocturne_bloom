@@ -411,12 +411,12 @@ def update_config_from_trial_params(
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
     # Update CNN parameters
-    cfg_dict["cnn"]["cnnChannels"] = [
+    cfg_dict["cnn"]["cnn_channels"] = [
         trial_params["cnn_ch1"],
         trial_params["cnn_ch2"],
         trial_params["cnn_ch3"],
     ]
-    cfg_dict["cnn"]["kernelSize"] = [
+    cfg_dict["cnn"]["kernel_size"] = [
         trial_params["kernel1"],
         trial_params["kernel2"],
         trial_params["kernel3"],
@@ -426,7 +426,7 @@ def update_config_from_trial_params(
         trial_params.get("padding2", 1),
         trial_params.get("padding3", 1),
     ]
-    cfg_dict["cnn"]["poolSize"] = [
+    cfg_dict["cnn"]["pool_size"] = [
         trial_params["pool1"],
         trial_params["pool2"],
         trial_params.get("pool3", 3),
@@ -437,7 +437,7 @@ def update_config_from_trial_params(
         trial_params["dropout2"],
     ]
     cfg_dict["cnn"]["num_classes"] = trial_params.get("num_classes", 3)
-    cfg_dict["cnn"]["outputSize"] = trial_params.get("output_size", 1)
+    cfg_dict["cnn"]["output_size"] = trial_params.get("output_size", 1)
 
     # Update Ridge parameters
     cfg_dict["ridge"]["alpha"] = trial_params["ridge_alpha"]
@@ -498,16 +498,16 @@ def update_config_from_trial_params(
     )
 
     # Update optimiser parameters
-    cfg_dict["optimiser"]["weightDecay"] = trial_params["weight_decay"]
+    cfg_dict["optimiser"]["weight_decay"] = trial_params["weight_decay"]
     cfg_dict["optimiser"]["eps"] = trial_params["optimizer_eps"]
-    cfg_dict["optimiser"]["schedulerMode"] = trial_params.get(
+    cfg_dict["optimiser"]["scheduler_mode"] = trial_params.get(
         "scheduler_mode", "min"
     )
-    cfg_dict["optimiser"]["schedulerFactor"] = trial_params["scheduler_factor"]
-    cfg_dict["optimiser"]["schedulerPatience"] = trial_params[
+    cfg_dict["optimiser"]["scheduler_factor"] = trial_params["scheduler_factor"]
+    cfg_dict["optimiser"]["scheduler_patience"] = trial_params[
         "scheduler_patience"
     ]
-    cfg_dict["optimiser"]["schedulerMinLR"] = trial_params["scheduler_min_lr"]
+    cfg_dict["optimiser"]["scheduler_min_lr"] = trial_params["scheduler_min_lr"]
 
     # Update trainer parameters
     cfg_dict["trainer"]["max_epochs"] = trial_params["max_epochs"]

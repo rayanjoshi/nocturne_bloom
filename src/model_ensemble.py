@@ -68,13 +68,13 @@ class MultiHeadCNN(nn.Module):
 
     Args:
         cfg (DictConfig): Configuration object with CNN parameters:
-            - cnn.inputChannels (int): Number of input channels.
+            - cnn.input_channels (int): Number of input channels.
             - cnn.num_classes (int): Number of output classes for classification.
-            - cnn.cnnChannels (list): List of channel sizes for CNN layers.
-            - cnn.kernelSize (list): Kernel sizes for convolutional layers.
+            - cnn.cnn_channels (list): List of channel sizes for CNN layers.
+            - cnn.kernel_size (list): Kernel sizes for convolutional layers.
             - cnn.padding (list): Padding sizes for convolutional layers.
-            - cnn.poolSize (list): Pooling kernel sizes.
-            - cnn.poolPadding (list): Pooling padding sizes.
+            - cnn.pool_size (list): Pooling kernel sizes.
+            - cnn.pool_padding (list): Pooling padding sizes.
             - cnn.stride (int): Stride for pooling layers.
             - cnn.dropout (list): Dropout rates for layers.
             - cnn.output_seq_len (int): Length of output price sequence.
@@ -91,45 +91,45 @@ class MultiHeadCNN(nn.Module):
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing CNN model with config: {cfg.cnn}")
         super().__init__()
-        input_channels = cfg.cnn.inputChannels
-        cnn_channels = [cfg.cnn.cnnChannels[0], cfg.cnn.cnnChannels[1], cfg.cnn.cnnChannels[2]]
+        input_channels = cfg.cnn.input_channels
+        cnn_channels = [cfg.cnn.cnn_channels[0], cfg.cnn.cnn_channels[1], cfg.cnn.cnn_channels[2]]
         output_seq_len = cfg.cnn.output_seq_len
 
         self.cnn = nn.Sequential(
             nn.Conv1d(
             input_channels,
             cnn_channels[0],
-            kernel_size=cfg.cnn.kernelSize[0],
+            kernel_size=cfg.cnn.kernel_size[0],
             padding=cfg.cnn.padding[0],
             ),
             nn.BatchNorm1d(cnn_channels[0]),
             nn.ReLU(inplace=True),
             nn.MaxPool1d(
-            kernel_size=cfg.cnn.poolSize[0],
+            kernel_size=cfg.cnn.pool_size[0],
             stride=cfg.cnn.stride,
-            padding=cfg.cnn.poolPadding[0],
+            padding=cfg.cnn.pool_padding[0],
             ),
             nn.Dropout(cfg.cnn.dropout[0] * 0.5),
 
             nn.Conv1d(
             cnn_channels[0],
             cnn_channels[1],
-            kernel_size=cfg.cnn.kernelSize[1],
+            kernel_size=cfg.cnn.kernel_size[1],
             padding=cfg.cnn.padding[1],
             ),
             nn.BatchNorm1d(cnn_channels[1]),
             nn.ReLU(inplace=True),
             nn.MaxPool1d(
-            kernel_size=cfg.cnn.poolSize[1],
+            kernel_size=cfg.cnn.pool_size[1],
             stride=cfg.cnn.stride,
-            padding=cfg.cnn.poolPadding[1],
+            padding=cfg.cnn.pool_padding[1],
             ),
             nn.Dropout(cfg.cnn.dropout[0]),
 
             nn.Conv1d(
             cnn_channels[1],
             cnn_channels[2],
-            kernel_size=cfg.cnn.kernelSize[2],
+            kernel_size=cfg.cnn.kernel_size[2],
             padding=cfg.cnn.padding[2],
             ),
             nn.BatchNorm1d(cnn_channels[2]),
@@ -138,7 +138,7 @@ class MultiHeadCNN(nn.Module):
             nn.Conv1d(
             cnn_channels[2],
             cnn_channels[2],
-            kernel_size=cfg.cnn.kernelSize[2],
+            kernel_size=cfg.cnn.kernel_size[2],
             padding=cfg.cnn.padding[2],
             ),
             nn.BatchNorm1d(cnn_channels[2]),
@@ -303,7 +303,7 @@ class RidgeRegressor(nn.Module):
         self.fit_intercept = cfg.ridge.fit_intercept
         self.eps = cfg.ridge.eps
         self.output_seq_len = cfg.cnn.output_seq_len
-        self.input_dim = self.cfg.cnn.inputChannels * cfg.data_module.window_size
+        self.input_dim = self.cfg.cnn.input_channels * cfg.data_module.window_size
 
         # Ridge parameters (will be set during fit).
         self.weight = nn.Parameter(
@@ -490,7 +490,7 @@ class LSTMClassifier(nn.Module):
             - cfg.lstm.hidden_size (int): Hidden dimension size of the LSTM.
             - cfg.lstm.num_layers (int): Number of LSTM layers.
             - cfg.lstm.dropout (float): Dropout rate.
-            - cfg.cnn.inputChannels (int): Dimensionality of input features.
+            - cfg.cnn.input_channels (int): Dimensionality of input features.
             - cfg.cnn.num_classes (int): Number of output classes.
     """
     def __init__(self, cfg: DictConfig):
@@ -499,7 +499,7 @@ class LSTMClassifier(nn.Module):
             f"num_layers={cfg.lstm.num_layers}"
         )
         super().__init__()
-        self.input_size = cfg.cnn.inputChannels
+        self.input_size = cfg.cnn.input_channels
         self.hidden_size = cfg.lstm.hidden_size
         self.num_layers = cfg.lstm.num_layers
         self.num_classes = cfg.cnn.num_classes
@@ -1542,16 +1542,16 @@ class EnsembleModule(L.LightningModule):
 
         optimizer = torch.optim.Adam(
             param_groups,
-            weight_decay=self.cfg.optimiser.weightDecay,
+            weight_decay=self.cfg.optimiser.weight_decay,
             eps=self.cfg.optimiser.eps
         )
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            mode=self.cfg.optimiser.schedulerMode,
-            factor=self.cfg.optimiser.schedulerFactor,
-            patience=self.cfg.optimiser.schedulerPatience,
-            min_lr=self.cfg.optimiser.schedulerMinLR
+            mode=self.cfg.optimiser.scheduler_mode,
+            factor=self.cfg.optimiser.scheduler_factor,
+            patience=self.cfg.optimiser.scheduler_patience,
+            min_lr=self.cfg.optimiser.scheduler_min_lr
         )
 
         return {
