@@ -76,124 +76,151 @@ def feature_engineering(df, save_data_path):
     df.dropna(inplace=True)
     logger.debug(f"Rows dropped after NaN removal: {df.shape[0]}")
 
+    # Create a dictionary to store all new features
+    new_features = {}
+
     # -------- Candle Indicators --------- #
-    df['Body'] = df['Close'] - df['Open']
-    df['upperWick'] = df['High'] - df[['Close', 'Open']].max(axis=1)
-    df['lowerWick'] = df[['Close', 'Open']].min(axis=1) - df['Low']
-    b_mean = df['Body'].mean()
-    u_mean = df['upperWick'].mean()
-    l_mean = df['lowerWick'].mean()
+    new_features['Body'] = df['Close'] - df['Open']
+    new_features['upperWick'] = df['High'] - df[['Close', 'Open']].max(axis=1)
+    new_features['lowerWick'] = df[['Close', 'Open']].min(axis=1) - df['Low']
+    b_mean = new_features['Body'].mean()
+    u_mean = new_features['upperWick'].mean()
+    l_mean = new_features['lowerWick'].mean()
     logger.debug(
         f"Created candle features: Body mean {b_mean:.2f}, "
         f"upperWick mean {u_mean:.2f}, "
         f"lowerWick mean {l_mean:.2f}"
     )
-    df['Doji'] = (abs(df['Close'] - df['Open']) / df['Close'] < 0.001).astype(int)
-    logger.debug(f"Created 'Doji' feature: {df['Doji'].sum()} Doji candles detected")
+    new_features['Doji'] = (abs(df['Close'] - df['Open']) / df['Close'] < 0.001).astype(int)
+    logger.debug(f"Created 'Doji' feature: {new_features['Doji'].sum()} Doji candles detected")
 
-    df['Bullish_Engulfing'] = (
+    new_features['Bullish_Engulfing'] = (
         (df['Close'].shift(1) < df['Open'].shift(1)) &  # Previous bearish candle
         (df['Close'] > df['Open']) &  # Current bullish candle
         (df['Close'] > df['Open'].shift(1)) &  # Engulfs previous open
         (df['Open'] < df['Close'].shift(1))  # Engulfs previous close
     ).astype(int)
-    logger.debug(f"Created 'Bullish_Engulfing': {df['Bullish_Engulfing'].sum()} patterns detected")
+    count_bullish_engulf = int(new_features['Bullish_Engulfing'].sum())
+    logger.debug(f"Created 'Bullish_Engulfing': {count_bullish_engulf} patterns detected")
 
-    df['Bearish_Engulfing'] = (
+    new_features['Bearish_Engulfing'] = (
         (df['Close'].shift(1) > df['Open'].shift(1)) &  # Previous bullish candle
         (df['Close'] < df['Open']) &  # Current bearish candle
         (df['Close'] < df['Open'].shift(1)) &  # Engulfs previous open
         (df['Open'] > df['Close'].shift(1))  # Engulfs previous close
     ).astype(int)
-    logger.debug(f"Created 'Bearish_Engulfing': {df['Bearish_Engulfing'].sum()} patterns detected")
+    count_bearish_engulf = int(new_features['Bearish_Engulfing'].sum())
+    logger.debug(f"Created 'Bearish_Engulfing': {count_bearish_engulf} patterns detected")
 
-    df['Hammer'] = (
-        (df['Body'].abs() < 0.3 * (df['High'] - df['Low'])) &  # Small body
-        (df['lowerWick'] > 2 * df['upperWick']) &  # Long lower wick
-        (df['lowerWick'] > 0.5 * df['Body'].abs())  # Lower wick dominates
+    new_features['Hammer'] = (
+        (new_features['Body'].abs() < 0.3 * (df['High'] - df['Low'])) &  # Small body
+        (new_features['lowerWick'] > 2 * new_features['upperWick']) &  # Long lower wick
+        (new_features['lowerWick'] > 0.5 * new_features['Body'].abs())  # Lower wick dominates
     ).astype(int)
-    logger.debug(f"Created 'Hammer': {df['Hammer'].sum()} patterns detected")
+    logger.debug(f"Created 'Hammer': {new_features['Hammer'].sum()} patterns detected")
 
-    df['Shooting_Star'] = (
-        (df['Body'].abs() < 0.3 * (df['High'] - df['Low'])) &  # Small body
-        (df['upperWick'] > 2 * df['lowerWick']) &  # Long upper wick
-        (df['upperWick'] > 0.5 * df['Body'].abs())  # Upper wick dominates
+    new_features['Shooting_Star'] = (
+        (new_features['Body'].abs() < 0.3 * (df['High'] - df['Low'])) &  # Small body
+        (new_features['upperWick'] > 2 * new_features['lowerWick']) &  # Long upper wick
+        (new_features['upperWick'] > 0.5 * new_features['Body'].abs())  # Upper wick dominates
     ).astype(int)
-    logger.debug(f"Created 'Shooting_Star': {df['Shooting_Star'].sum()} patterns detected")
+    logger.debug(
+        f"Created 'Shooting_Star': "
+        f"{new_features['Shooting_Star'].sum()} patterns detected"
+    )
 
-    df['Bullish_Trend'] = (df['Close'] > df['Open']).rolling(5).mean()
-    logger.debug(f"Created 'Bullish_Trend' with mean: {df['Bullish_Trend'].mean():.2f}")
-    df['Bearish_Trend'] = (df['Close'] < df['Open']).rolling(5).mean()
-    logger.debug(f"Created 'Bearish_Trend' with mean: {df['Bearish_Trend'].mean():.2f}")
+    new_features['Bullish_Trend'] = (df['Close'] > df['Open']).rolling(5).mean()
+    logger.debug(f"Created 'Bullish_Trend' with mean: {new_features['Bullish_Trend'].mean():.2f}")
+    new_features['Bearish_Trend'] = (df['Close'] < df['Open']).rolling(5).mean()
+    logger.debug(f"Created 'Bearish_Trend' with mean: {new_features['Bearish_Trend'].mean():.2f}")
 
-    df['Wick_to_Body_Ratio'] = (df['upperWick'] + df['lowerWick']) / (df['Body'].abs() + 1e-6)
-    mean_wbr = df['Wick_to_Body_Ratio'].mean()
-    std_wbr = df['Wick_to_Body_Ratio'].std()
+    new_features['Wick_to_Body_Ratio'] = (
+        (new_features['upperWick'] + new_features['lowerWick'])
+        / (new_features['Body'].abs() + 1e-6)
+    )
+    mean_wbr = new_features['Wick_to_Body_Ratio'].mean()
+    std_wbr = new_features['Wick_to_Body_Ratio'].std()
     logger.debug(f"Created 'Wick_to_Body_Ratio' with mean: {mean_wbr:.2f}, std: {std_wbr:.2f}")
 
-    df['Consecutive_Bullish'] = (df['Close'] > df['Open']).rolling(3).sum()
-    df['Consecutive_Bearish'] = (df['Close'] < df['Open']).rolling(3).sum()
-    logger.debug(f"Created 'Consecutive_Bullish' with mean: {df['Consecutive_Bullish'].mean():.2f}")
-    logger.debug(f"Created 'Consecutive_Bearish' with mean: {df['Consecutive_Bearish'].mean():.2f}")
+    new_features['Consecutive_Bullish'] = (df['Close'] > df['Open']).rolling(3).sum()
+    new_features['Consecutive_Bearish'] = (df['Close'] < df['Open']).rolling(3).sum()
+    cb_mean = new_features['Consecutive_Bullish'].mean()
+    logger.debug(f"Created 'Consecutive_Bullish' with mean: {cb_mean:.2f}")
+    mean_consecutive_bear = new_features['Consecutive_Bearish'].mean()
+    logger.debug(
+        f"Created 'Consecutive_Bearish' with mean: {mean_consecutive_bear:.2f}"
+    )
 
     # -------- Momentum/ Trend Indicators -------- #
-    df['RSI'] = ta.rsi(df['Close'], length=14)
-    logger.debug(f"Created 'RSI' with mean: {df['RSI'].mean():.2f}, std: {df['RSI'].std():.2f}")
-    df['rsi_momentum'] = df['RSI'].diff(5)
+    new_features['RSI'] = ta.rsi(df['Close'], length=14)
+    rsi_mean = new_features['RSI'].mean()
+    rsi_std = new_features['RSI'].std()
+    logger.debug(f"Created 'RSI' with mean: {rsi_mean:.2f}, std: {rsi_std:.2f}")
+    new_features['rsi_momentum'] = new_features['RSI'].diff(5)
 
     macd_data = ta.macd(df['Close'])
-    df['MACD'] = macd_data['MACD_12_26_9']
-    df['MACDSignal'] = macd_data['MACDs_12_26_9']
-    macd_min = df['MACD'].min()
-    macd_max = df['MACD'].max()
-    macd_sig_min = df['MACDSignal'].min()
-    macd_sig_max = df['MACDSignal'].max()
+    new_features['MACD'] = macd_data['MACD_12_26_9']
+    new_features['MACDSignal'] = macd_data['MACDs_12_26_9']
+    macd_min = new_features['MACD'].min()
+    macd_max = new_features['MACD'].max()
+    macd_sig_min = new_features['MACDSignal'].min()
+    macd_sig_max = new_features['MACDSignal'].max()
     logger.debug(
         f"Created MACD features: MACD range [{macd_min:.2f}, {macd_max:.2f}], "
         f"MACDSignal range [{macd_sig_min:.2f}, {macd_sig_max:.2f}]"
     )
 
-    df['SMA_20'] = df['Close'].rolling(window=20).mean()
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    df['SMA_200'] = df['Close'].rolling(window=200).mean()
+    new_features['SMA_20'] = df['Close'].rolling(window=20).mean()
+    new_features['SMA_50'] = df['Close'].rolling(window=50).mean()
+    new_features['SMA_200'] = df['Close'].rolling(window=200).mean()
     if len(df) < 200:
         logger.error(f"Insufficient data for SMA_200 calculation: {len(df)} rows available")
         raise ValueError("Insufficient data for 200-day SMA")
-    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
-    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
+    new_features['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
+    new_features['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
 
-    df['rateOfChange'] = (df['Close'] - df['Close'].shift(12)) / df['Close'].shift(12) * 100
-    df['momentum'] = df['Close'].diff(10)
+    prev_close_12 = df['Close'].shift(12)
+    new_features['rateOfChange'] = (
+        (df['Close'] - prev_close_12)
+        / (prev_close_12 + 1e-6)
+    ) * 100
+    new_features['momentum'] = df['Close'].diff(10)
 
-    df['averageDirectionalIndex'] = ta.adx(df['High'], df['Low'], df['Close'], length=14)['ADX_14']
+    adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
+    new_features['averageDirectionalIndex'] = adx_df['ADX_14']
+    logger.debug(
+        f"Created 'averageDirectionalIndex' "
+        f"mean: {new_features['averageDirectionalIndex'].mean():.2f}, "
+        f"std: {new_features['averageDirectionalIndex'].std():.2f}"
+    )
 
-    df['massIndex'] = ta.massi(df['High'], df['Low'], fast=9, slow=25)
+    new_features['massIndex'] = ta.massi(df['High'], df['Low'], fast=9, slow=25)
 
-    df['commodityChannelIndex'] = ta.cci(df['High'], df['Low'], df['Close'], length=20)
+    new_features['commodityChannelIndex'] = ta.cci(df['High'], df['Low'], df['Close'], length=20)
 
-    df['price_acceleration'] = df['Close'].pct_change(5) - df['Close'].pct_change(10)
+    new_features['price_acceleration'] = df['Close'].pct_change(5) - df['Close'].pct_change(10)
 
-    df['volume_surge'] = df['Volume'] / df['Volume'].rolling(20).mean()
-    df['volume_momentum'] = df['volume_surge'].diff(3)
+    new_features['volume_surge'] = df['Volume'] / df['Volume'].rolling(20).mean()
+    new_features['volume_momentum'] = new_features['volume_surge'].diff(3)
 
     # Multi-timeframe momentum
-    df['momentum_1d'] = df['Close'].pct_change(1)
-    df['momentum_5d'] = df['Close'].pct_change(5)
-    df['momentum_10d'] = df['Close'].pct_change(10)
-    df['momentum_consistency'] = (
-        (df['momentum_1d'] > 0).rolling(5).sum() / 5
+    new_features['momentum_1d'] = df['Close'].pct_change(1)
+    new_features['momentum_5d'] = df['Close'].pct_change(5)
+    new_features['momentum_10d'] = df['Close'].pct_change(10)
+    new_features['momentum_consistency'] = (
+        (new_features['momentum_1d'] > 0).rolling(5).sum() / 5
     )
 
     stoch = ta.stoch(
         df['High'], df['Low'], df['Close'], k=14, d=3, smooth_k=3
     )
-    df['Stochastic_K'] = stoch['STOCHk_14_3_3']
-    df['Stochastic_D'] = stoch['STOCHd_14_3_3']
+    new_features['Stochastic_K'] = stoch['STOCHk_14_3_3']
+    new_features['Stochastic_D'] = stoch['STOCHd_14_3_3']
 
-    k_mean = df['Stochastic_K'].mean()
-    k_std = df['Stochastic_K'].std()
-    d_mean = df['Stochastic_D'].mean()
-    d_std = df['Stochastic_D'].std()
+    k_mean = new_features['Stochastic_K'].mean()
+    k_std = new_features['Stochastic_K'].std()
+    d_mean = new_features['Stochastic_D'].mean()
+    d_std = new_features['Stochastic_D'].std()
 
     logger.debug(
         f"Created 'Stochastic_K' mean {k_mean:.2f} std {k_std:.2f}"
@@ -202,117 +229,136 @@ def feature_engineering(df, save_data_path):
         f"Created 'Stochastic_D' mean {d_mean:.2f} std {d_std:.2f}"
     )
 
-    df['Price_RSI_Divergence'] = df['momentum_5d'] - df['RSI'].diff(5)
+    new_features['Price_RSI_Divergence'] = new_features['momentum_5d'] - new_features['RSI'].diff(5)
     logger.debug(
         "Created 'Price_RSI_Divergence' "
-        f"mean: {df['Price_RSI_Divergence'].mean():.2f}, "
-        f"std: {df['Price_RSI_Divergence'].std():.2f}"
+        f"mean: {new_features['Price_RSI_Divergence'].mean():.2f}, "
+        f"std: {new_features['Price_RSI_Divergence'].std():.2f}"
     )
 
-    df['Reversal_Score'] = (
-        (df['RSI'] < 30).astype(int) - (df['RSI'] > 70).astype(int) +  # Oversold/overbought
-        (df['MACD'] > df['MACDSignal']).astype(int) - (df['MACD'] < df['MACDSignal']).astype(int) +
-        (df['Stochastic_K'] < 20).astype(int) - (df['Stochastic_K'] > 80).astype(int)
+    rsi_buy = (new_features['RSI'] < 30).astype(int)
+    rsi_sell = (new_features['RSI'] > 70).astype(int)
+    macd_pos = (new_features['MACD'] > new_features['MACDSignal']).astype(int)
+    macd_neg = (new_features['MACD'] < new_features['MACDSignal']).astype(int)
+    stoch_buy = (new_features['Stochastic_K'] < 20).astype(int)
+    stoch_sell = (new_features['Stochastic_K'] > 80).astype(int)
+
+    new_features['Reversal_Score'] = (
+        rsi_buy - rsi_sell +
+        macd_pos - macd_neg +
+        stoch_buy - stoch_sell
     )
-    min_rs = df['Reversal_Score'].min()
-    max_rs = df['Reversal_Score'].max()
+    min_rs = new_features['Reversal_Score'].min()
+    max_rs = new_features['Reversal_Score'].max()
     logger.debug(
         f"Created 'Reversal_Score' with range: [{min_rs:.2f}, {max_rs:.2f}]"
     )
 
     # --------- Volatility Indicators --------- #
     bb_data = ta.bbands(df['Close'], length=20, std=2)
-    df['BBHigh'] = bb_data['BBU_20_2.0']
-    df['BBLow'] = bb_data['BBL_20_2.0']
-    bbhigh_mean = df['BBHigh'].mean()
-    bblow_mean = df['BBLow'].mean()
+    new_features['BBHigh'] = bb_data['BBU_20_2.0']
+    new_features['BBLow'] = bb_data['BBL_20_2.0']
+    bbhigh_mean = new_features['BBHigh'].mean()
+    bblow_mean = new_features['BBLow'].mean()
     logger.debug(
         f"Created Bollinger Bands: BBHigh mean {bbhigh_mean:.2f}, BBLow mean {bblow_mean:.2f}",
     )
 
-    df['priceChange'] = df['Close'].diff()
-    df['closeChangePercentage'] = df['Close'].pct_change()
+    new_features['priceChange'] = df['Close'].diff()
+    new_features['closeChangePercentage'] = df['Close'].pct_change()
 
-    df['averageTrueRange'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+    new_features['averageTrueRange'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
     # Normalize ATR change by price to avoid a long single line
-    atr_ratio = df['averageTrueRange'] / df['Close']
-    df['ATR_Normalized_Change'] = df['closeChangePercentage'] / atr_ratio
-    mean_atr = df['ATR_Normalized_Change'].mean()
-    std_atr = df['ATR_Normalized_Change'].std()
+    atr_ratio = new_features['averageTrueRange'] / df['Close']
+    new_features['ATR_Normalized_Change'] = new_features['closeChangePercentage'] / atr_ratio
+    mean_atr = new_features['ATR_Normalized_Change'].mean()
+    std_atr = new_features['ATR_Normalized_Change'].std()
     logger.debug(f"Created 'ATR_Normalized_Change' with mean: {mean_atr:.2f}, std: {std_atr:.2f}")
 
-    df['rollingStd'] = df['Close'].rolling(window=14).std()
+    new_features['rollingStd'] = df['Close'].rolling(window=14).std()
 
     aroon_data = ta.aroon(df['High'], df['Low'], length=14)
-    df['aroonUp'] = aroon_data['AROONU_14']
-    df['aroonDown'] = aroon_data['AROOND_14']
+    new_features['aroonUp'] = aroon_data['AROONU_14']
+    new_features['aroonDown'] = aroon_data['AROOND_14']
 
-    df['ulcerIndex'] = ta.ui(df['Close'], length=14)
+    new_features['ulcerIndex'] = ta.ui(df['Close'], length=14)
 
     vix_roll = df['VIX_Proxy'].rolling(126)
     vix_mean = vix_roll.mean()
     vix_std = vix_roll.std() + 1e-6  # avoid division-by-zero
-    df['vix_normalized'] = (df['VIX_Proxy'] - vix_mean) / vix_std
-    df['vix_regime'] = (df['VIX_Proxy'] > df['VIX_Proxy'].rolling(126).quantile(0.75)).astype(int)
+    new_features['vix_normalized'] = (df['VIX_Proxy'] - vix_mean) / vix_std
+    vix_q75 = vix_roll.quantile(0.75)
+    new_features['vix_regime'] = (df['VIX_Proxy'] > vix_q75).astype(int)
+    logger.debug(f"Created 'vix_regime': {int(new_features['vix_regime'].sum())} high VIX periods")
 
-    df['Volatility_Breakout_Up'] = (df['Close'] > df['BBHigh'] + df['averageTrueRange']).astype(int)
-    logger.debug(f"Created 'Volatility_Breakout_Up': {df['Volatility_Breakout_Up'].sum()} events")
+    vol_up_threshold = new_features['BBHigh'] + new_features['averageTrueRange']
+    new_features['Volatility_Breakout_Up'] = (df['Close'] > vol_up_threshold).astype(int)
+    vol_up_count = int(new_features['Volatility_Breakout_Up'].sum())
+    logger.debug(f"Created 'Volatility_Breakout_Up': {vol_up_count} events")
     # Volatility breakout down: close below BBLow minus ATR
-    vol_breakout_down = df['Close'] < (df['BBLow'] - df['averageTrueRange'])
-    df['Volatility_Breakout_Down'] = vol_breakout_down.astype(int)
-    count_vol_breakout_down = int(df['Volatility_Breakout_Down'].sum())
+    vol_breakout_down = df['Close'] < (new_features['BBLow'] - new_features['averageTrueRange'])
+    new_features['Volatility_Breakout_Down'] = vol_breakout_down.astype(int)
+    count_vol_breakout_down = int(new_features['Volatility_Breakout_Down'].sum())
     logger.debug(
         f"Created 'Volatility_Breakout_Down': {count_vol_breakout_down} events",
     )
 
     # --------- Volume Indicators --------- #
-    df['volumeChange'] = df['Volume'].diff()
-    df['volumeRateOfChange'] = (
+    new_features['volumeChange'] = df['Volume'].diff()
+    new_features['volumeRateOfChange'] = (
         (df['Volume'] - df['Volume'].shift(12))
         / df['Volume'].shift(12)
         * 100
     )
 
-    df['onBalanceVolume'] = ta.obv(df['Close'], df['Volume'])
-    mean_obv = df['onBalanceVolume'].mean()
-    std_obv = df['onBalanceVolume'].std()
+    new_features['onBalanceVolume'] = ta.obv(df['Close'], df['Volume'])
+    mean_obv = new_features['onBalanceVolume'].mean()
+    std_obv = new_features['onBalanceVolume'].std()
     logger.debug(
         f"Created 'onBalanceVolume' with mean: {mean_obv:.2f}, std: {std_obv:.2f}",
     )
 
-    df['chaikinMoneyFlow'] = ta.cmf(df['High'], df['Low'], df['Close'], df['Volume'], length=20)
-    cmf_mean = df['chaikinMoneyFlow'].mean()
-    cmf_std = df['chaikinMoneyFlow'].std()
+    cmf = ta.cmf(
+        df['High'],
+        df['Low'],
+        df['Close'],
+        df['Volume'],
+        length=20,
+    )
+    new_features['chaikinMoneyFlow'] = cmf
+    cmf_mean = new_features['chaikinMoneyFlow'].mean()
+    cmf_std = new_features['chaikinMoneyFlow'].std()
     logger.debug(
         f"Created 'chaikinMoneyFlow' with mean: {cmf_mean:.2f}, std: {cmf_std:.2f}",
     )
 
     # Force Index - using custom calculation as pandas-ta might not have exact equivalent
-    df['forceIndex'] = (df['Close'] - df['Close'].shift(1)) * df['Volume']
-    df['forceIndex'] = df['forceIndex'].rolling(window=20).mean()
-    fi_mean = df['forceIndex'].mean()
-    fi_std = df['forceIndex'].std()
+    new_features['forceIndex'] = (df['Close'] - df['Close'].shift(1)) * df['Volume']
+    new_features['forceIndex'] = new_features['forceIndex'].rolling(window=20).mean()
+    fi_mean = new_features['forceIndex'].mean()
+    fi_std = new_features['forceIndex'].std()
     logger.debug(
         f"Created 'forceIndex' with mean: {fi_mean:.2f}, "
         f"std: {fi_std:.2f}"
     )
 
-    df['Volume_Breakout_Up'] = (
-        (df['Close'] > df['BBHigh']) &
-        (df['volume_surge'] > 1.5)
+    new_features['Volume_Breakout_Up'] = (
+        (df['Close'] > new_features['BBHigh']) &
+        (new_features['volume_surge'] > 1.5)
     ).astype(int)
-    logger.debug(f"Created 'Volume_Breakout_Up': {df['Volume_Breakout_Up'].sum()} events")
-    df['Volume_Breakout_Down'] = (
-        (df['Close'] < df['BBLow']) &
-        (df['volume_surge'] > 1.5)
+    logger.debug(f"Created 'Volume_Breakout_Up': {new_features['Volume_Breakout_Up'].sum()} events")
+    new_features['Volume_Breakout_Down'] = (
+        (df['Close'] < new_features['BBLow']) &
+        (new_features['volume_surge'] > 1.5)
     ).astype(int)
-    logger.debug(f"Created 'Volume_Breakout_Down': {df['Volume_Breakout_Down'].sum()} events")
+    vol_breakout_down_count = int(new_features['Volume_Breakout_Down'].sum())
+    logger.debug(f"Created 'Volume_Breakout_Down': {vol_breakout_down_count} events")
 
-    df['Volume_Price_Divergence'] = (
-    df['volume_surge'] - df['momentum_5d'].abs()
+    new_features['Volume_Price_Divergence'] = (
+    new_features['volume_surge'] - new_features['momentum_5d'].abs()
     )
-    mean_vpd = df['Volume_Price_Divergence'].mean()
-    std_vpd = df['Volume_Price_Divergence'].std()
+    mean_vpd = new_features['Volume_Price_Divergence'].mean()
+    std_vpd = new_features['Volume_Price_Divergence'].std()
     logger.debug(
         "Created 'Volume_Price_Divergence' "
         f"with mean: {mean_vpd:.2f}, std: {std_vpd:.2f}"
@@ -328,142 +374,157 @@ def feature_engineering(df, save_data_path):
             if df['Volume'].iloc[i] < df['Volume'].iloc[i-1]:
                 nvi_value = nvi_value * (df['Close'].iloc[i] / df['Close'].iloc[i-1])
             nvi.append(nvi_value)
-    df['negativeVolumeIndex'] = nvi
-    mean_nvi = df['negativeVolumeIndex'].mean()
-    std_nvi = df['negativeVolumeIndex'].std()
+    # store as a pandas Series so we can call .mean() / .std() on it
+    new_features['negativeVolumeIndex'] = pd.Series(nvi, index=df.index)
+    mean_nvi = new_features['negativeVolumeIndex'].mean()
+    std_nvi = new_features['negativeVolumeIndex'].std()
     logger.debug(
         "Created 'negativeVolumeIndex' with mean: %.2f, std: %.2f",
         mean_nvi, std_nvi
     )
 
-    df['rolling_vol_5'] = df['Close'].pct_change().rolling(5).std()
-    df['rolling_vol_21'] = df['Close'].pct_change().rolling(21).std()
-    df['vol_percentile_21d'] = df['rolling_vol_21'].rolling(126).rank(pct=True)
-    df['vol_percentile_5d'] = df['rolling_vol_5'].rolling(63).rank(pct=True)
-    df['regime_high_vol'] = (df['vol_percentile_21d'] > 0.8).astype(int)
+    new_features['rolling_vol_5'] = df['Close'].pct_change().rolling(5).std()
+    new_features['rolling_vol_21'] = df['Close'].pct_change().rolling(21).std()
+    new_features['vol_percentile_21d'] = new_features['rolling_vol_21'].rolling(126).rank(pct=True)
+    new_features['vol_percentile_5d'] = new_features['rolling_vol_5'].rolling(63).rank(pct=True)
+    new_features['regime_high_vol'] = (new_features['vol_percentile_21d'] > 0.8).astype(int)
 
-    df['vol_divergence'] = df['rolling_vol_21'] - (df['VIX_Proxy'] / 100) # Normalize VIX
+    vix_normalized = df['VIX_Proxy'] / 100.0  # normalize VIX to comparable scale
+    new_features['vol_divergence'] = new_features['rolling_vol_21'] - vix_normalized
+    logger.debug(
+        f"Created 'vol_divergence' mean {new_features['vol_divergence'].mean():.4f}, "
+        f"std {new_features['vol_divergence'].std():.4f}"
+    )
+    new_features['volume_vol'] = df['Volume'].rolling(20).std() / df['Volume'].rolling(20).mean()
+    new_features['volume_price_trend'] = df['Volume'].rolling(5).corr(df['Close'])
 
-    df['volume_vol'] = df['Volume'].rolling(20).std() / df['Volume'].rolling(20).mean()
-    df['volume_price_trend'] = df['Volume'].rolling(5).corr(df['Close'])
+    new_features['volume_skew'] = df['Volume'].rolling(20).skew()
+    new_features['volume_acceleration'] = df['Volume'].pct_change(5)
+    new_features['volume_breakout'] = (
+        df['Volume'] > df['Volume'].rolling(50).quantile(0.9)
+    ).astype(int)
 
-    df['volume_skew'] = df['Volume'].rolling(20).skew()
-    df['volume_acceleration'] = df['Volume'].pct_change(5)
-    df['volume_breakout'] = (df['Volume'] > df['Volume'].rolling(50).quantile(0.9)).astype(int)
-
-    df['volume_price_divergence'] = (
-        df['volume_surge'] - df['Close'].pct_change().abs().rolling(5).mean()
+    new_features['volume_price_divergence'] = (
+        new_features['volume_surge'] - df['Close'].pct_change().abs().rolling(5).mean()
     )
 
     # --------- Statistical Indicators --------- #
-    df['sigma'] = df['Close'].rolling(window=20).std()
+    new_features['sigma'] = df['Close'].rolling(window=20).std()
     close_rolling = df['Close'].rolling(window=20)
     volume_rolling = df['Volume'].rolling(window=20)
-    df['beta'] = close_rolling.cov(df['Volume']) / volume_rolling.var()
-    df['skewness'] = df['Close'].rolling(window=20).skew()
+    new_features['beta'] = close_rolling.cov(df['Volume']) / volume_rolling.var()
+    new_features['skewness'] = df['Close'].rolling(window=20).skew()
 
     # --------- Gap Analysis --------- #
-    df['overnight_gap'] = (df['Open'] - df['Close'].shift(1)) / df['Close'].shift(1)
-    df['gap_magnitude_avg_5d'] = df['overnight_gap'].abs().rolling(5).mean()
-    df['large_gap_frequency'] = (df['overnight_gap'].abs() > 0.03).rolling(20).sum()
+    new_features['overnight_gap'] = (df['Open'] - df['Close'].shift(1)) / df['Close'].shift(1)
+    new_features['gap_magnitude_avg_5d'] = new_features['overnight_gap'].abs().rolling(5).mean()
+    new_features['large_gap_frequency'] = (
+        (new_features['overnight_gap'].abs() > 0.03)
+        .rolling(20)
+        .sum()
+    )
+    logger.debug(
+        f"Created 'large_gap_frequency' with total events: "
+        f"{int(new_features['large_gap_frequency'].sum())}"
+    )
 
     # --------- AI/Tech Sector Proxies --------- #
-    df['tech_sector_rotation'] = df['Close'] / df['SPY_Close'] - 1
-    df['nasdaq_relative_strength'] = df['Close'] / df['QQQ_Close'] - 1
-    df['semiconductor_strength'] = df['Close'] / df['SOXX_Close'] - 1
+    new_features['tech_sector_rotation'] = df['Close'] / df['SPY_Close'] - 1
+    new_features['nasdaq_relative_strength'] = df['Close'] / df['QQQ_Close'] - 1
+    new_features['semiconductor_strength'] = df['Close'] / df['SOXX_Close'] - 1
 
-    df['spy_qqq_spread'] = (df['QQQ_Close'] / df['SPY_Close']).pct_change()
-    df['soxx_qqq_spread'] = (df['SOXX_Close'] / df['QQQ_Close']).pct_change()
+    new_features['spy_qqq_spread'] = (df['QQQ_Close'] / df['SPY_Close']).pct_change()
+    new_features['soxx_qqq_spread'] = (df['SOXX_Close'] / df['QQQ_Close']).pct_change()
 
     qqq_pct = df['QQQ_Close'].pct_change()
     spy_pct = df['SPY_Close'].pct_change()
     soxx_pct = df['SOXX_Close'].pct_change()
     nvda_pct = df['Close'].pct_change()
 
-    df['tech_leadership'] = (
+    new_features['tech_leadership'] = (
         (qqq_pct - spy_pct)
         .rolling(10)
         .mean()
     )
 
-    df['semiconductor_leadership'] = (
+    new_features['semiconductor_leadership'] = (
         (soxx_pct - qqq_pct)
         .rolling(10)
         .mean()
     )
 
-    df['nvda_outperformance'] = (
+    new_features['nvda_outperformance'] = (
         (nvda_pct - soxx_pct)
         .rolling(5)
         .mean()
     )
-    df['sector_momentum_divergence'] = (
+    new_features['sector_momentum_divergence'] = (
         df['Close'].pct_change(10) - df['SOXX_Close'].pct_change(10)
     )
 
-    df['mega_cap_rotation'] = (
+    new_features['mega_cap_rotation'] = (
         df['QQQ_Close'].pct_change(5) - df['SPY_Close'].pct_change(5)
     ).rolling(10).mean()
 
-    df['momentum_persistence_3d'] = (
-        (df['nvda_outperformance'] > 0).rolling(3).sum() / 3
+    new_features['momentum_persistence_3d'] = (
+        (new_features['nvda_outperformance'] > 0).rolling(3).sum() / 3
     )
 
-    df['ai_momentum_strength'] = (
-        df['nvda_outperformance'] *
-        df['tech_leadership'] *
-        df['semiconductor_strength']
+    new_features['ai_momentum_strength'] = (
+        new_features['nvda_outperformance'] *
+        new_features['tech_leadership'] *
+        new_features['semiconductor_strength']
     )
-    ai_min = df['ai_momentum_strength'].min()
-    ai_max = df['ai_momentum_strength'].max()
+    ai_min = new_features['ai_momentum_strength'].min()
+    ai_max = new_features['ai_momentum_strength'].max()
     logger.debug(
         "Created 'ai_momentum_strength' with range: "
         f"[{ai_min:.2f}, {ai_max:.2f}]"
     )
 
-    df['momentum_acceleration'] = (
-        df['ai_momentum_strength'].diff(1) +
-        df['ai_momentum_strength'].diff(2)
+    new_features['momentum_acceleration'] = (
+        new_features['ai_momentum_strength'].diff(1) +
+        new_features['ai_momentum_strength'].diff(2)
         ) / 2
-    mean_ma = df['momentum_acceleration'].mean()
-    std_ma = df['momentum_acceleration'].std()
+    mean_ma = new_features['momentum_acceleration'].mean()
+    std_ma = new_features['momentum_acceleration'].std()
     logger.debug(
         f"Created 'momentum_acceleration' with mean: {mean_ma:.2f}, "
         f"std: {std_ma:.2f}"
     )
 
-    df['confirmed_momentum'] = (
-        df['ai_momentum_strength'] *
-        (df['volume_surge'] > 1).astype(float)
+    new_features['confirmed_momentum'] = (
+        new_features['ai_momentum_strength'] *
+        (new_features['volume_surge'] > 1).astype(float)
         )
-    cm_mean = df['confirmed_momentum'].mean()
-    cm_std = df['confirmed_momentum'].std()
+    cm_mean = new_features['confirmed_momentum'].mean()
+    cm_std = new_features['confirmed_momentum'].std()
     logger.debug(
         "Created 'confirmed_momentum' with mean: %.2f, std: %.2f",
         cm_mean, cm_std,
     )
 
     # --------- Cross-Asset Correlations --------- #
-    df['vix_spread'] = df['VIX_Proxy'] - df['VIX_Proxy'].rolling(20).mean()
+    new_features['vix_spread'] = df['VIX_Proxy'] - df['VIX_Proxy'].rolling(20).mean()
     spy_pct_change = df['SPY_Close'].pct_change()
     nvda_pct_change = df['Close'].pct_change()
-    df['spy_nvda_correlation'] = (
+    new_features['spy_nvda_correlation'] = (
         nvda_pct_change.rolling(20)
         .corr(spy_pct_change)
     )
 
     qqq_pct_change = df['QQQ_Close'].pct_change()
-    df['qqq_nvda_correlation'] = (
+    new_features['qqq_nvda_correlation'] = (
         nvda_pct_change.rolling(20)
         .corr(qqq_pct_change)
     )
-    df['treasury_equity_spread'] = df['Treasury_10Y'].diff() * -1
+    new_features['treasury_equity_spread'] = df['Treasury_10Y'].diff() * -1
 
-    df['Sector_Direction_Divergence'] = (
-        df['momentum_5d'] - df['SOXX_Close'].pct_change(5)
+    new_features['Sector_Direction_Divergence'] = (
+        new_features['momentum_5d'] - df['SOXX_Close'].pct_change(5)
     )
-    sector_mean = df['Sector_Direction_Divergence'].mean()
-    sector_std = df['Sector_Direction_Divergence'].std()
+    sector_mean = new_features['Sector_Direction_Divergence'].mean()
+    sector_std = new_features['Sector_Direction_Divergence'].std()
     logger.debug(
         "Created 'Sector_Direction_Divergence' "
         f"with mean: {sector_mean:.2f}, std: {sector_std:.2f}"
@@ -471,55 +532,71 @@ def feature_engineering(df, save_data_path):
 
     vix_roll = df['VIX_Proxy'].rolling(20)
     vix_thresh = vix_roll.quantile(0.9)
-    df['VIX_Direction_Signal'] = (
+    new_features['VIX_Direction_Signal'] = (
         df['VIX_Proxy'] > vix_thresh
     ).astype(int)
     logger.debug(
         "Created 'VIX_Direction_Signal': "
-        f"{df['VIX_Direction_Signal'].sum()} high VIX events"
+        f"{new_features['VIX_Direction_Signal'].sum()} high VIX events"
     )
 
     # --------- Trend and Breakout Indicators --------- #
-    df['trend_strength'] = (df['Close'] > df['SMA_200']).rolling(20).mean()
-    df['bull_market_intensity'] = (
-        (df['Close'] > df['SMA_50']).astype(int) +
-        (df['SMA_50'] > df['SMA_200']).astype(int) +
+    new_features['trend_strength'] = (df['Close'] > new_features['SMA_200']).rolling(20).mean()
+    new_features['bull_market_intensity'] = (
+        (df['Close'] > new_features['SMA_50']).astype(int) +
+        (new_features['SMA_50'] > new_features['SMA_200']).astype(int) +
         (df['Close'].pct_change(20) > 0.1).astype(int)
     )
 
-    df['price_vs_bb_position'] = (df['Close'] - df['BBLow']) / (df['BBHigh'] - df['BBLow'])
-    df['breakout_signal'] = (df['Close'] > df['BBHigh']).astype(int)
+    # Price position within Bollinger Bands (0=BBLow, 1=BBHigh)
+    _bb_range = new_features['BBHigh'] - new_features['BBLow'] + 1e-6
+    new_features['price_vs_bb_position'] = (
+        (df['Close'] - new_features['BBLow']) / _bb_range
+    )
+    logger.debug(
+        f"Created 'price_vs_bb_position' mean {new_features['price_vs_bb_position'].mean():.4f}, "
+        f"std {new_features['price_vs_bb_position'].std():.4f}"
+    )
+    new_features['breakout_signal'] = (df['Close'] > new_features['BBHigh']).astype(int)
 
-    df['Time_Since_Breakout'] = 0
-    breakout_indices = df[(df['breakout_signal'] == 1) |
-                            (df['Volatility_Breakout_Up'] == 1) |
-                            (df['Volatility_Breakout_Down'] == 1)].index
+    # Time since breakout calculation
+    time_since_breakout = []
+    last_breakout_idx = 0
     for i in range(len(df)):
-        if i == 0:
-            continue
-    eligible_breakouts = [idx for idx in breakout_indices if idx <= df.index[i]]
-    if eligible_breakouts:
-        last_breakout = max(eligible_breakouts)
-    else:
-        last_breakout = df.index[0]
-    # Use .loc to avoid chained-assignment and to be compatible with pandas Copy-on-Write
-    df.loc[df.index[i], 'Time_Since_Breakout'] = (df.index[i] - last_breakout).days
-    logger.debug(f"Created 'Time_Since_Breakout' with mean: {df['Time_Since_Breakout'].mean():.2f}")
+        # Check for breakout at current index
+        if (new_features['breakout_signal'].iloc[i] == 1 or
+            new_features['Volatility_Breakout_Up'].iloc[i] == 1 or
+            new_features['Volatility_Breakout_Down'].iloc[i] == 1):
+            last_breakout_idx = i
+
+        # Calculate days since last breakout
+        days_since = i - last_breakout_idx
+        time_since_breakout.append(days_since)
+
+    new_features['Time_Since_Breakout'] = time_since_breakout
+    logger.debug(f"Created 'Time_Since_Breakout' with mean: {np.mean(time_since_breakout):.2f}")
 
     # --------- Seasonal Indicators --------- #
-    df['days_in_quarter'] = df.index.dayofyear % 90
-    df['earnings_proximity'] = np.where(
-        df['days_in_quarter'].isin([1, 2, 3, 88, 89, 0]), 1, 0
+    new_features['days_in_quarter'] = df.index.dayofyear % 90
+    new_features['earnings_proximity'] = np.where(
+        new_features['days_in_quarter'].isin([1, 2, 3, 88, 89, 0]), 1, 0
     )
 
     # Shifted next-day price
-    df['Price_Target'] = df['Close'].shift(-1)
+    new_features['Price_Target'] = df['Close'].shift(-1)
     logger.debug("Shifted 'Price_Target' column for next-day prediction")
 
     # Calculate percentage change
-    df['direction_pct'] = ((df['Price_Target'] - df['Close']) / df['Close']) * 100
-    mean_dir_pct = df['direction_pct'].mean()
-    std_dir_pct = df['direction_pct'].std()
+    price_target = new_features['Price_Target']
+    close = df['Close']
+    # compute next-day percent change (with small eps to avoid div-by-zero)
+    new_features['direction_pct'] = ((price_target - close) / (close + 1e-6)) * 100
+    logger.debug(
+        f"Created 'direction_pct' mean: {new_features['direction_pct'].mean():.2f}, "
+        f"std: {new_features['direction_pct'].std():.2f}"
+    )
+    mean_dir_pct = new_features['direction_pct'].mean()
+    std_dir_pct = new_features['direction_pct'].std()
     logger.debug(
         f"Calculated 'direction_pct' with mean: {mean_dir_pct:.2f}, std: {std_dir_pct:.2f}"
     )
@@ -530,20 +607,28 @@ def feature_engineering(df, save_data_path):
     # Rolling ATR-based adaptive threshold (20-day window, scaled)
     atr_window = 20
     atr_multiplier = 1.5
-    atr_thresh = df['averageTrueRange'].rolling(atr_window).mean() * atr_multiplier
+    atr_thresh = new_features['averageTrueRange'].rolling(atr_window).mean() * atr_multiplier
 
     # Combine thresholds: use the max between fixed and ATR-based
     hybrid_thresh = np.maximum(fixed_thresh, atr_thresh)
     logger.debug(f"Hybrid threshold calculated with mean: {hybrid_thresh.mean():.2f}")
 
     # Step 4: Initialize Direction_Target as sideways (1)
-    df['Direction_Target'] = 1
-
-    # Step 5: Assign directional labels
-    df.loc[df['direction_pct'] > hybrid_thresh, 'Direction_Target'] = 2  # Up
-    df.loc[df['direction_pct'] < -hybrid_thresh, 'Direction_Target'] = 0  # Down
+    # Assign directional labels using numpy.where on the Series/array stored in the dict
+    new_features['Direction_Target'] = np.where(
+        new_features['direction_pct'] > hybrid_thresh, 2,
+        np.where(new_features['direction_pct'] < -hybrid_thresh, 0, 1)
+    )
 
     logger.debug("'Direction_Target' already shifted for next day prediction")
+
+    # Convert new_features dict to DataFrame and concatenate with original df
+    logger.info("Concatenating all new features to original DataFrame...")
+    new_features_df = pd.DataFrame(new_features, index=df.index)
+
+    # Use pd.concat to add all features at once - this avoids fragmentation warnings
+    df = pd.concat([df, new_features_df], axis=1)
+    logger.info(f"Successfully added {len(new_features)} new features to DataFrame")
 
     nan_count = df.isna().sum().sum()
     total_values = df.size
