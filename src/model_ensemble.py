@@ -93,7 +93,7 @@ class MultiHeadCNN(nn.Module):
         super().__init__()
         input_channels = cfg.cnn.input_channels
         cnn_channels = [cfg.cnn.cnn_channels[0], cfg.cnn.cnn_channels[1], cfg.cnn.cnn_channels[2]]
-        output_seq_len = cfg.cnn.output_seq_len
+        output_seq_len = cfg.data_module.output_seq_len
 
         self.cnn = nn.Sequential(
             nn.Conv1d(
@@ -302,7 +302,7 @@ class RidgeRegressor(nn.Module):
         self.alpha = cfg.ridge.alpha
         self.fit_intercept = cfg.ridge.fit_intercept
         self.eps = cfg.ridge.eps
-        self.output_seq_len = cfg.cnn.output_seq_len
+        self.output_seq_len = cfg.data_module.output_seq_len
         self.input_dim = self.cfg.cnn.input_channels * cfg.data_module.window_size
 
         # Ridge parameters (will be set during fit).
@@ -907,7 +907,7 @@ class EnsembleModule(L.LightningModule):
             meta_price_dim = 9
             self.meta_price = MetaPriceRegressor(
                 in_dim=meta_price_dim,
-                output_seq_len=self.cfg.cnn.output_seq_len,
+                output_seq_len=self.cfg.data_module.output_seq_len,
             )
 
         # Configuration
