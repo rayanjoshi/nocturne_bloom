@@ -182,6 +182,8 @@ app.index_string = '''
             #sidebar {
                 width: 280px;
                 background: linear-gradient(135deg, #76B900 0%, #1a1a1a 100%);
+                border-top-right-radius: 12px;
+                border-bottom-right-radius: 12px;
                 padding: 30px 20px;
                 box-shadow: 2px 0 10px rgba(0,0,0,0.3);
                 height: 100vh;
@@ -196,8 +198,10 @@ app.index_string = '''
             #page-content {
                 margin-left: 280px;
                 padding: 40px;
+                border-top-left-radius: 12px;
+                border-bottom-left-radius: 12px;
                 flex-grow: 1;
-                background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+                background: linear-gradient(200deg, #000000 -30%, #1a1a1a 100%);
                 min-height: 100vh;
                 width: calc(100vh - 280px);
                 word-wrap: break-word;
@@ -221,7 +225,7 @@ app.index_string = '''
             }
             
             .sidebar-link:hover {
-                background-color: rgba(45, 90, 107, 0.3);
+                background-color: #0076b985;
                 color: white;
                 text-decoration: none;
                 border-left-color: #b90076;
@@ -234,7 +238,7 @@ app.index_string = '''
             }
             
             #home-link {
-                background-color: rgba(45, 90, 107, 0.5);
+                background-color: #0076b985;
                 color: white;
                 border-left-color: #b90076;
             }
