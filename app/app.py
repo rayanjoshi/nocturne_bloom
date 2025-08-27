@@ -236,6 +236,7 @@ def update_env_file(n_clicks, username, password):
 
 @app.callback(
     Output('process-status', 'children'),
+    Output('prepare-data-button', 'disabled'),
     Input('prepare-data-button', 'n_clicks'),
     prevent_initial_call=True
 )
@@ -314,12 +315,18 @@ def process_data_pipeline(n_clicks):
                 html.P("All data processing completed successfully!",
                     style={"color": "#76B900", "font-size": "0.875rem",
                             "margin": "0.625rem 0", "font-weight": "bold"}))
-
     except (OSError, ValueError, RuntimeError) as e:
         status_messages.append(
             html.P(f"Pipeline Error: {str(e)}",
                 style={"color": "#b90076", "font-size": "0.75rem", "margin": "0.0625rem 0"}))
-    return html.Div(status_messages)
+        return (
+            html.Div(status_messages),
+            False
+        )
+    return (
+        html.Div(status_messages),
+        False
+    )
 
 dash.register_page("Training", path="/training",
                     layout=html.Div([
@@ -504,6 +511,7 @@ app.index_string = '''
             .data_load_button {
                 background-color: #0076b9;
                 border: none;
+                border-radius: 1.5625rem;
                 padding: 0.625rem 1.25rem;
                 margin-top: 0.625rem;
                 margin-bottom: 0.3125rem;
