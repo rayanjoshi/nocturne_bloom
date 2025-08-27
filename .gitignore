@@ -16,3 +16,4 @@ outputs/
 logs/*
 *.egg-info
 outputs/
+.env
