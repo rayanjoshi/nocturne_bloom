@@ -6,6 +6,7 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import dash
 import plotly.express as px
+import plotly.io as pio
 import pandas as pd
 
 app = Dash(__name__,
@@ -75,8 +76,18 @@ dash.register_page(
 script_dir = Path(__file__).parent  # /path/to/repo/app
 repo_root = script_dir.parent  # /path/to/repo/
 data_load_save_location = Path(repo_root / "data/raw/nvda_raw_data.csv").resolve()
+pio.templates.default = "plotly_dark"
 data_load_df = pd.read_csv(data_load_save_location)
-data_load_fig = px.line(data_load_df, x="date", y="Close", title="NVDA Daily Closing Prices")
+data_load_fig = px.line(data_load_df,
+                            x="date",
+                            y="Close",
+                            title="NVDA Daily Closing Prices",
+                            )
+data_load_fig.update_layout(
+    yaxis_title_text="Closing Price / $",
+    xaxis_title_text="Date"
+)
+data_load_fig.update_traces(line_color="#0076b9")
 
 dash.register_page("Data Preparation", path="/data-preparation",
     layout=html.Div([
