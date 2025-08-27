@@ -20,39 +20,46 @@ dash.register_page(
     "Home",
     path="/",
     layout=html.Div([
-        html.H1("Welcome!", className="mb-4", style={"color": "white"}),
-        html.H3("App Overview", className="mb-4", style={"color": "white"}),
+        html.H1("NVDA Stock Prediction Dashboard", className="mb-4", style={"color": "white"}),
+        html.H3("Harness AI for Financial Insights", className="mb-4", style={"color": "white"}),
         html.Div([
-            html.H5("1) Data Preparation", className="mb-2",
-                   style={"color": "white"}),
+            html.H5("1. Data Preparation", className="mb-2", style={"color": "white"}),
             html.P(
-                "Connect to WRDS with your credentials to load financial data "
-                "from 2004-2022. Perform feature engineering and create "
-                "Lightning data modules for model training.",
+                "Access Wharton Research Data Services (WRDS) to retrieve Nvidia (NVDA) "
+                "stock data (2004-2022) "
+                "and market indices (SPY, QQQ, VIX).",
                 className="mb-3",
                 style={"color": "white"},
             ),
-            html.H5("2) Model Training", className="mb-2",
-                   style={"color": "white"}),
-            html.P(
-                "Train machine learning models on your prepared data. Choose "
-                "from various algorithms and configure parameters.",
+            html.P("Transform data into predictive features and prepare it for "
+                "model training using PyTorch Lightning.",
                 className="mb-3",
                 style={"color": "white"},
             ),
-            html.H5("3) Backtesting", className="mb-2",
-                   style={"color": "white"}),
+            html.H5("2. Model Training", className="mb-2", style={"color": "white"}),
             html.P(
-                "Test your trained models on historical data to evaluate "
-                "performance and validate predictions.",
+                "Train an ensemble model with a multihead CNN for pattern recognition, Ridge "
+                "regression for price "
+                "forecasting, and an LSTM for trend prediction, unified by a meta-learner "
+                "for enhanced accuracy.",
                 className="mb-3",
                 style={"color": "white"},
             ),
-            html.H5("4) Prediction", className="mb-2",
-                   style={"color": "white"}),
             html.P(
-                "Generate future predictions using your trained and validated "
-                "models.",
+                "Optimize hyperparameters using Ray Tune and Optuna, with Weights & Biases "
+                "for experiment tracking.",
+                className="mb-3",
+                style={"color": "white"},
+            ),
+            html.H5("3. Backtesting", className="mb-2", style={"color": "white"}),
+            html.P(
+                "Evaluate the model on NVDA data (2023-2024) with metrics like Sharpe ratio "
+                "and maximum drawdown.",
+                className="mb-3",
+                style={"color": "white"},
+            ),
+            html.P(
+                "Validate trading strategies to ensure robust, data-driven decisions.",
                 className="mb-3",
                 style={"color": "white"},
             ),
@@ -74,7 +81,7 @@ dash.register_page("Training", path="/training",
                             style={"color": "white"})
                     ]))
 
-dash.register_page("Backtesting", path="/backtesting", 
+dash.register_page("Backtesting", path="/backtesting",
                     layout=html.Div([
                         html.H1("Backtesting", style={"color": "white"}),
                         html.P("Test your models on historical data.",
@@ -196,6 +203,7 @@ app.index_string = '''
                 word-wrap: break-word;
                 overflow-wrap: break-word;
                 box-sizing: border-box;
+                text-align: justify;
             }
             
             .nav-item {
