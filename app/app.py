@@ -1,7 +1,12 @@
-from dash import Dash, html, dcc
+from pathlib import Path
+import subprocess
+import sys
+from dash import Dash, html, dcc, Input, Output, State
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import dash
-
+import plotly.express as px
+import pandas as pd
 
 app = Dash(__name__,
             use_pages=True,
@@ -67,12 +72,241 @@ dash.register_page(
     ])
 )
 
+script_dir = Path(__file__).parent  # /path/to/repo/app
+repo_root = script_dir.parent  # /path/to/repo/
+data_load_save_location = Path(repo_root / "data/raw/nvda_raw_data.csv").resolve()
+data_load_df = pd.read_csv(data_load_save_location)
+data_load_fig = px.line(data_load_df, x="date", y="Close", title="NVDA Daily Closing Prices")
+
 dash.register_page("Data Preparation", path="/data-preparation",
-                    layout=html.Div([
-                        html.H1("Data Preparation", style={"color": "white"}),
-                        html.P("Prepare your data for machine learning models.",
-                            style={"color": "white"})
-                    ]))
+    layout=html.Div([
+        html.H1("Data Preparation",
+                style={"color": "white", "text-align": "left", "margin-bottom": "20px"}
+        ),
+        html.H3("Access WRDS to retrieve stock data and prepare for model training",
+                style={"color": "white", "margin-bottom": "30px"}
+        ),
+        html.Div([
+            # Left column (WRDS login & information)
+            html.Div([
+                html.H5("WRDS LOGIN", style={"color": "white", "margin-bottom": "10px"}),
+                html.P("USERNAME", style={"color": "white", "margin-bottom": "5px"}),
+                dcc.Input(placeholder="Enter your WRDS username",
+                    type="text",
+                    className="mb-3",
+                    id="wrds-username",
+                    style={"width": "100%", "margin-bottom": "10px"}),
+                html.P("PASSWORD", style={"color": "white", "margin-bottom": "5px"}),
+                dcc.Input(placeholder="Enter your WRDS password",
+                    type="password",
+                    className="mb-3",
+                    id="wrds-password",
+                    style={"width": "100%", "margin-bottom": "15px"}),
+                html.Button("LOGIN",
+                    id="login-button",
+                    className="btn btn-primary data_load_button",
+                    ),
+                html.Div(id="login-status", style={"margin-bottom": "10px"}),
+                html.Div([
+                    html.H6("Information",
+                    style={"color": "white", "margin-bottom": "10px"}),
+                    html.P("Date Range: 2004-10-31 - 2022-12-31",
+                    style={"color": "white", "font-size": "14px", "line-height": "1.4"}),
+                    html.P("Stock: NVDA",
+                    style={"color": "white", "font-size": "14px", "line-height": "1.4"}),
+                    html.P("Other Tickers: SPY, QQQ, VIXY ",
+                    style={"color": "white", "font-size": "14px", "line-height": "1.4"}),
+                    html.P("Economic Indicators: 10 Year Treasury Yield",
+                    style={"color": "white", "font-size": "14px", "line-height": "1.4"}),
+                    html.P("Some data were not available in the date range, so were imputed "
+                            "using existing data. The date range was extended back to 2004, "
+                            "so PE and PB ratios could also be calculated for early 2005 data.",
+                    style={"color": "white", "font-size": "14px", "line-height": "1.4"})
+                ],
+                style={"margin-top": "40px"})
+            ], style={
+                "width": "35%",
+                "padding": "20px",
+                "border-right": "2px solid #333",
+                "min-height": "500px"
+            }),
+
+            # Right column (graph, buttons, status)
+            html.Div([
+                html.Div([
+                    dcc.Graph(figure=data_load_fig, style={"height": "400px"})
+                ], style={"margin-bottom": "10px"}),
+
+                html.Div([
+                    html.Button(
+                        "Prepare Data",
+                        id="prepare-data-button",
+                        className="btn btn-primary data_load_button",
+                    )
+                ]),
+
+                html.Div(id="process-status", style={"margin-top": "5px"}),
+            ], style={"width": "65%", "padding": "20px", "text-align": "center"})
+        ], style={
+            "display": "flex",
+            "width": "100%",
+            "margin-top": "20px"
+        })
+    ])
+)
+
+@app.callback(
+    Output('login-status', 'children'),
+    Input('login-button', 'n_clicks'),
+    [State('wrds-username', 'value'),
+    State('wrds-password', 'value')],
+    prevent_initial_call=True
+)
+def update_env_file(n_clicks, username, password):
+    """
+    Update the .env file with WRDS credentials and provide user feedback.
+
+    This function handles the updating of WRDS credentials in the .env file
+    located at the repository root. It reads existing environment variables,
+    updates them with the provided username and password, and writes them back
+    to the .env file. It returns an HTML Div component with a success or error
+    message to display to the user.
+
+    Args:
+        n_clicks (Optional[int]): Number of times the submit button was clicked.
+            If None, the update is prevented.
+        username (str): WRDS username to be saved in the .env file.
+        password (str): WRDS password to be saved in the .env file.
+
+    Returns:
+        html.Div: A Dash HTML Div component containing a success or error message
+            with appropriate styling.
+
+    Raises:
+        PreventUpdate: If n_clicks is None, indicating no user action.
+        OSError: If there are issues reading from or writing to the .env file.
+        ValueError: If the .env file contains malformed key-value pairs.
+    """
+    if n_clicks is None:
+        raise PreventUpdate
+
+    if not username or not password:
+        return html.Div("Please enter both username and password",
+                        style={"color": "#b90076", "font-size": "12px"})
+
+    try:
+        # Define the path to the .env file (in the repo root)
+        env_path = repo_root / ".env"
+
+        # Read existing .env file if it exists
+        env_vars = {}
+        if env_path.exists():
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip() and not line.startswith('#'):
+                        key, value = line.strip().split('=', 1)
+                        env_vars[key] = value
+
+        # Update with new credentials
+        env_vars['WRDS_USERNAME'] = username
+        env_vars['WRDS_PASSWORD'] = password
+
+        # Write back to .env file
+        with open(env_path, 'w', encoding='utf-8') as f:
+            for key, value in env_vars.items():
+                f.write(f"{key}={value}\n")
+
+        return html.Div("✓ Credentials saved successfully!",
+                        style={"color": "#76B900", "font-size": "12px"})
+
+    except (OSError, ValueError) as e:
+        return html.Div(f"Error saving credentials: {str(e)}",
+                        style={"color": "#b90076", "font-size": "12px"})
+
+@app.callback(
+    Output('process-status', 'children'),
+    Input('prepare-data-button', 'n_clicks'),
+    prevent_initial_call=True
+)
+def process_data_pipeline(n_clicks):
+    """
+    Execute a sequence of data processing scripts and return status messages.
+
+    This function runs a predefined list of Python scripts in the specified order
+    from the 'src' directory. It captures the output of each script and generates
+    styled HTML status messages indicating success or failure.
+
+    Args:
+        n_clicks (int or None): Number of times the button was clicked. If None,
+            the function raises PreventUpdate to halt execution.
+
+    Returns:
+        dash.html.Div: A Div containing styled HTML status messages for each script
+            execution, including success, failure, or error messages.
+
+    Raises:
+        PreventUpdate: If n_clicks is None, preventing the pipeline from running.
+        OSError: If there is an issue accessing or running the script files.
+        ValueError: If there is an issue with the script execution parameters.
+        RuntimeError: If an unexpected error occurs during script execution.
+    """
+    if n_clicks is None:
+        raise PreventUpdate
+
+    # Get the src directory path
+    local_script_dir = Path(__file__).parent
+    local_repo_root = local_script_dir.parent
+    src_dir = local_repo_root / 'src'
+
+    # Define the scripts to run in order
+    scripts = [
+        ('Data Loader', 'data_loader.py'),
+        ('Feature Engineering', 'feature_engineering.py'),
+        ('Data Module', 'data_module.py')
+    ]
+
+    status_messages = []
+
+    try:
+        for script_name, script_file in scripts:
+            status_messages.append(
+                html.P(f"Running {script_name}...",
+                        style={"color": "yellow", "font-size": "12px", "margin": "1px 0"}))
+
+            script_path = src_dir / script_file
+
+            # Run the script
+            result = subprocess.run([
+                sys.executable, str(script_path)
+            ], capture_output=True, text=True, check=False, cwd=src_dir.parent)
+
+            if result.returncode == 0:
+                status_messages.append(
+                    html.P(f"✓ {script_name} completed successfully",
+                        style={"color": "#76B900", "font-size": "12px", "margin": "1px 0"}))
+            else:
+                error_msg = result.stderr if result.stderr else result.stdout
+                status_messages.append(
+                    html.P(f"✗ {script_name} failed",
+                        style={"color": "#b90076", "font-size": "12px", "margin": "1px 0"}))
+                status_messages.append(
+                    html.P(f"Error: {error_msg[:200]}...",
+                        style={"color": "#b90076", "font-size": "10px", "margin": "1px 0",
+                                "font-family": "monospace"}))
+                break
+
+        # Final success message if all scripts completed
+        if all('completed successfully' in str(msg) for msg in status_messages[-len(scripts):]):
+            status_messages.append(
+                html.P("All data processing completed successfully!",
+                    style={"color": "#76B900", "font-size": "14px",
+                            "margin": "10px 0", "font-weight": "bold"}))
+
+    except (OSError, ValueError, RuntimeError) as e:
+        status_messages.append(
+            html.P(f"Pipeline Error: {str(e)}",
+                style={"color": "#b90076", "font-size": "12px", "margin": "2px 0"}))
+    return html.Div(status_messages)
 
 dash.register_page("Training", path="/training",
                     layout=html.Div([
@@ -161,22 +395,20 @@ app.index_string = '''
             }
             
             html, body {
-                height: 100vw;
+                height: 100vh;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 background-color: #1a1a1a;
                 color: white;
-                overflow: hidden;
             }
             
             #react-entry-point {
-                height: 100vw;
+                height: 100vh;
             }
             
             #main-container {
                 display: flex;
                 height: 100vh;
                 width: 100vw;
-                overflow-x: hidden;
             }
             
             #sidebar {
@@ -203,11 +435,12 @@ app.index_string = '''
                 flex-grow: 1;
                 background: linear-gradient(200deg, #000000 -30%, #1a1a1a 100%);
                 min-height: 100vh;
-                width: calc(100vh - 280px);
+                width: calc(100vw - 280px);
                 word-wrap: break-word;
                 overflow-wrap: break-word;
                 box-sizing: border-box;
                 text-align: justify;
+                overflow-y: auto;
             }
             
             .nav-item {
@@ -251,9 +484,17 @@ app.index_string = '''
                 color: #0076b9;
             }
             
-            
             .sidebar_Hr {
                 border: 1px solid #0076b9;
+            }
+            
+            .data_load_button {
+                background-color: #0076b9;
+                border: none;
+                padding: 10px 20px;
+                margin-top: 10px;
+                margin-bottom: 5px;
+                width: 100%;
             }
             
             /* Scrollbar styling for sidebar */
