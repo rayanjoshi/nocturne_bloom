@@ -285,7 +285,7 @@ def process_data_pipeline(n_clicks):
                         style={"color": "yellow", "font-size": "0.75rem", "margin": "0.0625rem 0"}))
 
             script_path = src_dir / script_file
-
+            all_success = True
             # Run the script
             result = subprocess.run([
                 sys.executable, str(script_path)
@@ -306,10 +306,10 @@ def process_data_pipeline(n_clicks):
                     html.P(f"Error: {error_msg[:200]}...",
                         style={"color": "#b90076", "font-size": "0.75rem", "margin": "0.0626rem 0",
                                 "font-family": "monospace"}))
+                all_success = False
                 break
-
-        # Final success message if all scripts completed
-        if all('completed successfully' in str(msg) for msg in status_messages[-len(scripts):]):
+        if all_success:
+            status_messages.clear()
             status_messages.append(
                 html.P("All data processing completed successfully!",
                     style={"color": "#76B900", "font-size": "0.875rem",
