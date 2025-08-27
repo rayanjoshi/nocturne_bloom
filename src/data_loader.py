@@ -17,14 +17,17 @@ rich logging for traceability and debugging.
 
 Dependencies:
     - wrds
+    - python-dotenv
     - pandas
     - hydra-core
     - omegaconf
     - scripts.logging_config (custom logging utilities)
 """
 import sys
+import os
 from typing import Optional
 from pathlib import Path
+from dotenv import load_dotenv
 import wrds
 import pandas as pd
 import hydra
@@ -60,7 +63,10 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
                             start_date=start_date, end_date=end_date, save_name=save_name)
 
     logger.info("Loading data from WRDS...")
-    db = wrds.Connection(wrds_username=cfg.data_loader.WRDS_USERNAME)
+    load_dotenv()
+    db = wrds.Connection(wrds_username=os.getenv("WRDS_USERNAME"),
+                            wrds_password=os.getenv("WRDS_PASSWORD"))
+    db.create_pgpass_file()
     logger.info("Connected to WRDS successfully.")
     # print(db.list_libraries())  # prints accessible data sets
     sql_path = Path(__file__).parent / cfg.data_loader.sql_save_path
