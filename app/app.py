@@ -8,6 +8,14 @@ import dash
 import plotly.express as px
 import plotly.io as pio
 import pandas as pd
+import diskcache
+
+script_dir = Path(__file__).parent  # /path/to/repo/app
+repo_root = script_dir.parent  # /path/to/repo/
+
+cache_location = Path(repo_root / "cache").resolve()
+cache = diskcache.Cache(cache_location)
+background_callback_manager = dash.DiskcacheManager(cache)
 
 app = Dash(__name__,
             use_pages=True,
@@ -73,8 +81,7 @@ dash.register_page(
     ])
 )
 
-script_dir = Path(__file__).parent  # /path/to/repo/app
-repo_root = script_dir.parent  # /path/to/repo/
+
 data_load_save_location = Path(repo_root / "data/raw/nvda_raw_data.csv").resolve()
 pio.templates.default = "plotly_dark"
 data_load_df = pd.read_csv(data_load_save_location)
@@ -117,6 +124,7 @@ dash.register_page("Data Preparation", path="/data-preparation",
                     id="login-button",
                     className="btn btn-primary data_load_button",
                     ),
+                html.P("Passes login details to .env file", style={"color": "white", "font-size": "0.875rem", "line-height": "1.4"}),
                 html.Div(id="login-status", style={"margin-bottom": "0.625rem"}),
                 html.Div([
                     html.H6("Information",
@@ -155,6 +163,11 @@ dash.register_page("Data Preparation", path="/data-preparation",
                         className="btn btn-primary data_load_button",
                     )
                 ]),
+
+                html.Progress(id="data-loading-progress",
+                                value="0",
+                                style={"height": "0.25rem"}
+                            ),
 
                 html.Div(id="process-status", style={"margin-top": "0.3125rem"}),
             ], style={"width": "65%", "padding": "1.25rem", "text-align": "center"})
@@ -207,7 +220,7 @@ def update_env_file(n_clicks, username, password):
 
     try:
         # Define the path to the .env file (in the repo root)
-        env_path = repo_root / ".env"
+        env_path = Path(repo_root / ".env").resolve()
 
         # Read existing .env file if it exists
         env_vars = {}
@@ -238,9 +251,15 @@ def update_env_file(n_clicks, username, password):
     Output('process-status', 'children'),
     Output('prepare-data-button', 'disabled'),
     Input('prepare-data-button', 'n_clicks'),
-    prevent_initial_call=True
+    prevent_initial_call=True,
+    background=True,
+    manager=background_callback_manager,
+    running=[
+        (Output('prepare-data-button', 'disabled'), True, False)
+    ],
+    progress=[Output("data-loading-progress", "value"), Output("data-loading-progress", "max")],
 )
-def process_data_pipeline(n_clicks):
+def process_data_pipeline(set_progress, n_clicks):
     """
     Execute a sequence of data processing scripts and return status messages.
 
@@ -277,10 +296,12 @@ def process_data_pipeline(n_clicks):
         ('Data Module', 'data_module.py')
     ]
 
+    total_scripts = len(scripts)
     status_messages = []
+    set_progress((str(0), str(total_scripts)))
 
     try:
-        for script_name, script_file in scripts:
+        for i, (script_name, script_file) in enumerate(scripts, 1):
             status_messages.append(
                 html.P(f"Running {script_name}...",
                         style={"color": "yellow", "font-size": "0.75rem", "margin": "0.0625rem 0"}))
@@ -291,6 +312,7 @@ def process_data_pipeline(n_clicks):
             result = subprocess.run([
                 sys.executable, str(script_path)
             ], capture_output=True, text=True, check=False, cwd=src_dir.parent)
+            set_progress((str(i), str(total_scripts)))
 
             if result.returncode == 0:
                 status_messages.append(
