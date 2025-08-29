@@ -7,6 +7,7 @@ and run trading simulations using Backtrader.
 """
 from pathlib import Path
 from typing import Optional
+import json
 import pandas as pd
 import hydra
 from omegaconf import DictConfig
@@ -16,7 +17,6 @@ import torch
 import backtrader as bt
 import quantstats as qs
 from numpy.lib.stride_tricks import sliding_window_view
-
 
 from src.data_loader import load_data
 from src.feature_engineering import feature_engineering
@@ -320,7 +320,6 @@ class MakePredictions:
         self.logger.info(f"Saved predictions with time column to {save_path}")
 
 
-
 class TradingSimulation:
     """
     Runs a trading simulation using Backtrader based on model predictions.
@@ -340,6 +339,42 @@ class TradingSimulation:
         self.predictions = df['Predicted'].values
         self.close_prices = df['Close'].values
         self.dates = df['Time'].values if 'Time' in df.columns else None
+
+    def save_trading_metrics(self, portfolio_values):
+        """
+        Save trading performance metrics to a JSON file.
+
+        Calculate key trading metrics from portfolio values, including Sharpe ratio,
+        annual return, maximum drawdown, win rate, and total return, and save them
+        to a JSON file in the data/metrics directory.
+
+        Args:
+            portfolio_values (list): List of portfolio values over time from the trading simulation.
+
+        Returns:
+            None
+        """
+
+        script_dir = Path(__file__).parent
+        repo_root = script_dir.parent
+        save_path = (repo_root / "data/predictions/trading_metrics.json").resolve()
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if len(portfolio_values) > 1:
+            returns = pd.Series(portfolio_values).pct_change().dropna()
+
+            metrics = {
+                'sharpe_ratio': float(qs.stats.sharpe(returns)),
+                'annual_return': float(qs.stats.cagr(returns)),
+                'max_drawdown': float(qs.stats.max_drawdown(returns)),
+                'win_rate': float(qs.stats.win_rate(returns)),
+                'total_return': float((portfolio_values[-1] / portfolio_values[0]) - 1),
+            }
+
+            with open(save_path, 'w', encoding='utf-8') as f:
+                json.dump(metrics, f, indent=2)
+
+            self.logger.info(f"Saved trading metrics to: {save_path}")
 
     def run(self):
         """
@@ -426,6 +461,8 @@ class TradingSimulation:
             self.logger.info(f"QuantStats Annual Return: {annual_return * 100:.2f}%")
             win_rate = qs.stats.win_rate(returns)
             self.logger.info(f"QuantStats Win Rate: {win_rate * 100:.2f}%")
+
+            self.save_trading_metrics(portfolio_values)
 
         else:
             self.logger.warning("Not enough data to calculate metrics.")
@@ -540,7 +577,8 @@ class StrategySimulation(bt.Strategy):
                     self.hold_counter >= (dynamic_max_hold if not is_uptrend else self.p.min_hold)
                 )
             if exit_condition:
-                self.log(f"CLOSE, {current_close:.2f}, Profit={pnl:.2%}, Hold={self.hold_counter} bars")
+                self.log(f"CLOSE, {current_close:.2f}, Profit={pnl:.2%}, "
+                            f"Hold={self.hold_counter} bars")
                 self.close()
                 self.hold_counter = 0
             return
