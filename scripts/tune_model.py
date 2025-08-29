@@ -13,6 +13,9 @@ The main components include:
 - Integration with logging and checkpointing for reproducibility.
 """
 import tempfile
+import os
+import subprocess
+from dotenv import load_dotenv
 from typing import Dict, Any, Optional
 from pathlib import Path
 import hydra
@@ -41,6 +44,11 @@ except ImportError as e:
 from src.model_ensemble import EnsembleModule
 from src.data_module import StockDataModule
 from scripts.logging_config import get_logger, setup_logging, log_function_start, log_function_end
+
+load_dotenv()
+wandb_api_key = os.getenv("WANDB_API_KEY")
+COMMAND = f"wandb login {wandb_api_key}"
+subprocess.run(COMMAND, shell=True, check=True)
 
 class MultiObjectiveMetric:
     """

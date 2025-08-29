@@ -8,6 +8,9 @@ with model checkpointing and early stopping, loads data and model modules, and
 executes the training process.
 
 Dependencies:
+    - os: For environment variable handling.
+    - subprocess: For running shell commands.
+    - dotenv: For loading environment variables from a .env file.
     - pathlib: For file path handling.
     - typing: For type hints in function signatures.
     - hydra: For configuration management.
@@ -20,6 +23,9 @@ Dependencies:
 """
 from pathlib import Path
 from typing import Optional
+import os
+import subprocess
+from dotenv import load_dotenv
 import hydra
 import torch
 from lightning.pytorch import Trainer
@@ -33,6 +39,12 @@ from scripts.logging_config import get_logger, setup_logging
 
 setup_logging(log_level="INFO", console_output=True, file_output=True)
 logger = get_logger("trainer")
+
+load_dotenv()
+wandb_api_key = os.getenv("WANDB_API_KEY")
+COMMAND = f"wandb login {wandb_api_key}"
+
+subprocess.run(COMMAND, shell=True, check=True)
 
 @hydra.main(version_base=None, config_path="../configs", config_name="trainer")
 def main(cfg: Optional[DictConfig] = None):
