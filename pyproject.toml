@@ -42,6 +42,7 @@ dependencies = [
     # -------- Dashboard -------- #
     "dash",
     "dash-bootstrap-components",
+    "dash[diskcache]",
 
     # -------- Hyperparameter Optimization -------- #
     "ray[tune]",
