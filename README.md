@@ -2,25 +2,24 @@
 NVIDIA (NVDA) stock price prediction pipeline and Dash dashboard.
 
 <p align="center">
-   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license" />
-   <img src="https://img.shields.io/badge/python-%3E%3D3.10-blue.svg" alt="python" />
+   <img src="https://img.shields.io/github/license/Ileriayo/markdown-badges?style=for-the-badge" alt="license" />
+   <img src="https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54" alt="python" />
+   <img src="https://img.shields.io/badge/yaml-%23ffffff.svg?style=for-the-badge&logo=yaml&logoColor=151515" alt="yaml" />
 </p>
 
 <p align="center">Built with the tools and technologies:</p>
 
 <p align="center">
-<img src="https://img.shields.io/badge/Dash-Plotly-1f77b4?logo=dash&logoColor=white" alt="Dash"/>
-<img src="https://img.shields.io/badge/Plotly-visuals-3f6ad8?logo=plotly&logoColor=white" alt="Plotly"/>
-<img src="https://img.shields.io/badge/pandas-data-150458?logo=pandas&logoColor=white" alt="pandas"/>
-<img src="https://img.shields.io/badge/NumPy-numeric-013243?logo=numpy&logoColor=white" alt="NumPy"/>
-<img src="https://img.shields.io/badge/scikit--learn-ml-f7931e?logo=scikit-learn&logoColor=white" alt="scikit-learn"/>
-<img src="https://img.shields.io/badge/PyTorch-deep%20learning-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch"/>
-<br>
-<img src="https://img.shields.io/badge/Lightning-PyTorch-7d3cff?logo=github&logoColor=white" alt="Lightning"/>
-<img src="https://img.shields.io/badge/Ray-distributed-00b2ff?logo=ray&logoColor=white" alt="Ray"/>
-<img src="https://img.shields.io/badge/Optuna-hpo-7b61ff?logo=optuna&logoColor=white" alt="Optuna"/>
-<img src="https://img.shields.io/badge/pytest-testing-1e90ff?logo=pytest&logoColor=white" alt="pytest"/>
-<img src="https://img.shields.io/badge/pylint-linter-4b32c3?logo=pylint&logoColor=white" alt="pylint"/>
+<img src="https://img.shields.io/badge/dash-008DE4?style=for-the-badge&logo=dash&logoColor=white" alt="Dash"/>
+<img src="https://img.shields.io/badge/Plotly-%233F4F75.svg?style=for-the-badge&logo=plotly&logoColor=white" alt="Plotly"/>
+<img src="https://img.shields.io/badge/pandas-%23150458.svg?style=for-the-badge&logo=pandas&logoColor=white" alt="pandas"/>
+<img src="https://img.shields.io/badge/numpy-%23013243.svg?style=for-the-badge&logo=numpy&logoColor=white" alt="NumPy"/>
+<img src="https://img.shields.io/badge/scikit--learn-%23F7931E.svg?style=for-the-badge&logo=scikit-learn&logoColor=white" alt="scikit-learn"/>
+<img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch"/>
+<img src="https://img.shields.io/badge/PyTorch--Lightning-792EE5?style=for-the-badge&logo=lightning&logoColor=white" alt="PyTorch Lightning"/>
+<img src="https://img.shields.io/badge/Ray-distributed-00b2ff?style=for-the-badge&logo=ray&logoColor=white" alt="Ray"/>
+<img src="https://img.shields.io/badge/Optuna-hpo-7b61ff?style=for-the-badge&logo=optuna&logoColor=white" alt="Optuna"/>
+<a href="https://github.com/pylint-dev/pylint"><img src="https://img.shields.io/badge/linting-pylint-yellowgreen?style=for-the-badge" alt="pylint"/></a>
 </p>
 
 A complete repository for building, evaluating, backtesting, and visualising next-day closing-price predictions for NVIDIA (NVDA). The repo combines data collection and preparation, feature engineering, an ensemble of predictive models (including CNN components), hyperparameter optimisation, backtesting, and a production-oriented Dash app for exploration.
@@ -29,7 +28,6 @@ A complete repository for building, evaluating, backtesting, and visualising nex
 - [What this repo does](#what-this-repo-does)
 - [Quick start](#quick-start)
 - [Installation](#installation-notes)
-- [Running the app](#quick-start)
 - [Project structure](#project-structure)
 - Important workflow notes:
    - [Running common workflows](#running-common-workflows)
@@ -85,20 +83,6 @@ Then open the Dash UI in your browser at the printed local address (default: htt
 - This repository lists dependencies in `pyproject.toml` and a `requirements.lock` file. Installing from `requirements.lock` will give a stable, reproducible environment.
 - The project uses PyTorch/PyTorch Lightning, Ray Tune/Optuna, Dash + dash-bootstrap-components, and financial/data helper libraries such as `wrds`, `pandas-ta` and `backtrader`.
 
-## Running common workflows
-
-- Data preparation (from the app UI): use the Data Preparation page to supply WRDS credentials and click "Prepare Data" — the app runs `src/data_loader.py`, `src/feature_engineering.py` and `src/data_module.py` in sequence.
-- Hyperparameter tuning: the Training page triggers `scripts/tune_model.py` via the UI (Ray Tune / Optuna).
-- Model training: the Training page triggers `scripts/train_model.py`.
-- Backtesting / evaluation: the Backtesting page runs `scripts/run_backtest.py` and reads results into `data/predictions/`.
-
-If you prefer CLI, these scripts live under `scripts/` and can be invoked with the repository Python environment. Example:
-
-```bash
-python scripts/train_model.py
-python scripts/run_backtest.py
-```
-
 ## Project structure
 
 ```
@@ -145,6 +129,20 @@ nocturne_bloom
    ├─ feature_engineering.py
    └─ model_ensemble.py
 
+```
+
+## Running common workflows
+
+- Data preparation (from the app UI): use the Data Preparation page to supply WRDS credentials and click "Prepare Data" — the app runs `src/data_loader.py`, `src/feature_engineering.py` and `src/data_module.py` in sequence.
+- Hyperparameter tuning: the Training page triggers `scripts/tune_model.py` via the UI (Ray Tune / Optuna).
+- Model training: the Training page triggers `scripts/train_model.py`.
+- Backtesting / evaluation: the Backtesting page runs `scripts/run_backtest.py` and reads results into `data/predictions/`.
+
+If you prefer CLI, these scripts live under `scripts/` and can be invoked with the repository Python environment. Example:
+
+```bash
+python scripts/train_model.py
+python scripts/run_backtest.py
 ```
 
 ## Environment variables and secrets
