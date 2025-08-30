@@ -1,4 +1,0 @@
-dash:
-  port: 8050
-  auto_reload: true
-  debug_mode: false
