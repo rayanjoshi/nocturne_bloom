@@ -1,3 +1,25 @@
+"""
+Machine Learning Stock Prediction Dashboard.
+
+This module implements a Dash web application for stock price prediction using
+machine learning techniques. The application provides an interactive interface to
+manage data preparation, model training, hyperparameter optimization, and backtesting
+for Nvidia (NVDA) stock data. It integrates with Wharton Research Data Services (WRDS)
+for data retrieval, uses PyTorch Lightning for model training, and employs Ray Tune
+and Optuna for hyperparameter optimization. The dashboard includes visualizations
+and performance metrics to evaluate model predictions.
+
+Key features include:
+- Data preparation with WRDS login and data processing pipelines
+- Ensemble model training with CNN, Ridge Regression, LSTM, and a meta-learner
+- Hyperparameter optimization with Ray Tune and Optuna
+- Backtesting with performance metrics (e.g., Sharpe ratio, MAPE)
+- Interactive UI with Bootstrap styling and Plotly visualizations
+
+Dependencies:
+    pathlib, subprocess, sys, json, numpy, dash, dash_bootstrap_components,
+    pandas, diskcache, plotly.express, plotly.io
+"""
 from pathlib import Path
 import subprocess
 import sys
@@ -126,7 +148,7 @@ dash.register_page("Data Preparation", path="/data-preparation",
                     style={"width": "100%", "margin-bottom": "0.9375rem"}),
                 html.Button("LOGIN",
                     id="login-button",
-                    className="btn btn-primary data_load_button",
+                    className="btn btn-primary data-load-button",
                     ),
                 html.P("Passes login details to .env file",
                     style={"color": "white", "font-size": "0.875rem", "line-height": "1.4"}
@@ -166,7 +188,7 @@ dash.register_page("Data Preparation", path="/data-preparation",
                     html.Button(
                         "Prepare Data",
                         id="prepare-data-button",
-                        className="btn btn-primary data_load_button",
+                        className="btn btn-primary data-load-button",
                     )
                 ]),
 
@@ -906,6 +928,35 @@ dash.register_page(
     ]
 )
 def evaluate_model(n_clicks):
+    """
+    Evaluate a model by running a backtest script and calculating performance metrics.
+
+    This function executes a model evaluation script, processes its output, and computes
+    various performance metrics from prediction and trading data. It returns formatted
+    HTML status messages and metric values for display.
+
+    Args:
+        n_clicks (int or None): Number of times a button has been clicked to trigger
+            the evaluation. If None, raises PreventUpdate to halt execution.
+
+    Returns:
+        tuple: Contains the following elements:
+            - html.Div or html.P: Status messages indicating the progress or outcome
+              of the evaluation process.
+            - bool: False, indicating whether a loading state should be active.
+            - str: Mean Absolute Error (MAE) formatted to three decimal places.
+            - str: Mean Absolute Percentage Error (MAPE) formatted to three decimal
+              places with a percentage sign.
+            - str: Directional accuracy formatted to three decimal places with a
+              percentage sign.
+            - str: Sharpe ratio formatted to three decimal places.
+            - str: Sortino ratio formatted to three decimal places.
+            - str: Maximum drawdown formatted to three decimal places with a
+              percentage sign.
+            - str: Annual return formatted to three decimal places with a percentage
+              sign.
+            - str: Win rate formatted to three decimal places with a percentage sign.
+    """
     if n_clicks is None:
         raise PreventUpdate
 
@@ -1171,7 +1222,7 @@ app.index_string = '''
                 border: 0.0625rem solid #0076b9;
             }
             
-            .data_load_button {
+            .data-load-button {
                 background-color: #0076b9;
                 border: none;
                 border-radius: 1.5625rem;
