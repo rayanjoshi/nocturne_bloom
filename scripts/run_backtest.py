@@ -365,6 +365,7 @@ class TradingSimulation:
 
             metrics = {
                 'sharpe_ratio': float(qs.stats.sharpe(returns)),
+                'sortino_ratio': float(qs.stats.sortino(returns)),
                 'annual_return': float(qs.stats.cagr(returns)),
                 'max_drawdown': float(qs.stats.max_drawdown(returns)),
                 'win_rate': float(qs.stats.win_rate(returns)),
