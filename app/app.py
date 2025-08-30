@@ -963,7 +963,7 @@ def evaluate_model(n_clicks):
     status_messages = []
     local_script_dir = Path(__file__).parent
     local_repo_root = local_script_dir.parent
-    src_dir = local_repo_root / 'scripts'
+    src_dir = Path(local_repo_root / 'scripts').resolve()
 
     scripts = [
         ('Model Evaluation', 'run_backtest.py')
@@ -1003,14 +1003,14 @@ def evaluate_model(n_clicks):
                 )
 
         # Load and calculate prediction metrics
-        predictions_path = local_repo_root / "data/predictions/nvda_predictions.csv"
+        predictions_path = Path(local_repo_root / "data/predictions/nvda_predictions.csv").resolve()
         df = pd.read_csv(predictions_path)
         mae = np.abs(df['Predicted'] - df['Close']).mean()
         mape = (np.abs((df['Predicted'] - df['Close']) / df['Close'])).mean() * 100
         directional_accuracy = (df['Direction_Match'] == 'yes').mean() * 100
 
         # Load trading metrics
-        metrics_path = local_repo_root / "data/predictions/trading_metrics.json"
+        metrics_path = Path(local_repo_root / "data/predictions/trading_metrics.json").resolve()
         try:
             with open(metrics_path, 'r', encoding='utf-8') as f:
                 trading_metrics = json.load(f)
