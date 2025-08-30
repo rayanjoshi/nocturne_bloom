@@ -1,5 +1,5 @@
 # nocturne_bloom
-NVIDIA (NVDA) stock price prediction pipeline and Dash dashboard.
+A Machine Learning Project for Financial Time-Series Analysis
 
 <p align="center">
    <img src="https://img.shields.io/github/license/Ileriayo/markdown-badges?style=for-the-badge" alt="license" />
@@ -7,7 +7,7 @@ NVIDIA (NVDA) stock price prediction pipeline and Dash dashboard.
    <img src="https://img.shields.io/badge/yaml-%23ffffff.svg?style=for-the-badge&logo=yaml&logoColor=151515" alt="yaml" />
 </p>
 
-<p align="center">Built with the tools and technologies:</p>
+<p align="left">Tools and technologies utilised in this project:</p>
 
 <p align="center">
 <img src="https://img.shields.io/badge/dash-008DE4?style=for-the-badge&logo=dash&logoColor=white" alt="Dash"/>
@@ -22,27 +22,34 @@ NVIDIA (NVDA) stock price prediction pipeline and Dash dashboard.
 <a href="https://github.com/pylint-dev/pylint"><img src="https://img.shields.io/badge/linting-pylint-yellowgreen?style=for-the-badge" alt="pylint"/></a>
 </p>
 
-A complete repository for building, evaluating, backtesting, and visualising next-day closing-price predictions for NVIDIA (NVDA). The repo combines data collection and preparation, feature engineering, an ensemble of predictive models (including CNN components), hyperparameter optimisation, backtesting, and a production-oriented Dash app for exploration.
+This repository supports a project exploring machine learning techniques for financial time-series analysis by building, evaluating, backtesting, and visualising next-day closing-price predictions for NVIDIA (NVDA). The repository combines data collection and preparation, feature engineering, an ensemble of predictive models (including CNN components), hyperparameter optimisation, backtesting, and a interactive Dash app for exploration.<p>
+
+This project is licensed under the MIT License. It uses the Wharton Research Data Services (WRDS) library, which is restricted to non-commercial academic use. Users must have a valid WRDS account and comply with [WRDS Terms of Use](https://wrds-www.wharton.upenn.edu/users/tou/). No WRDS data is included in this repository.
 
 ## Table of contents
-- [What this repo does](#what-this-repo-does)
+- [Academic Purpose](#academic-purpose)
+- [Research Overview](#research-overview)
 - [Quick start](#quick-start)
 - [Installation](#installation-notes)
 - [Project structure](#project-structure)
 - Important workflow notes:
-   - [Running common workflows](#running-common-workflows)
+   - [Executing standard workflows](#executing-standard-workflows)
    - [Environment variables and secrets](#environment-variables-and-secrets)
    - [Long-running operations & resource notes](#long-running-operations--resource-notes)
 - [Results](#results)
 - [License](#license)
 
-## What this repo does
+## Academic Purpose
+This project was developed for research purposes, such as exploring machine learning techniques in financial time-series analysis. It is not intended for commercial use, investment advice, or real-world trading. All components, including data handling, are restricted to non-commercial academic contexts to comply with data provider terms.
 
-- Loads and prepares historical OHLCV data for NVDA (and supporting tickers).
-- Builds an ensemble prediction system (CNN components + other models) to forecast next-day closing price.
-- Runs hyperparameter optimisation (Ray Tune / Optuna) and logs experiments using Weights & Biases.
-- Evaluates model predictions using standard regression and trading metrics and supports rolling backtests.
-- Exposes an interactive Dash dashboard at `app/app.py` for data/metrics/visualisation and to orchestrate pipeline steps from the UI - can be run from `run.py`.
+## Research Overview
+This project investigates the application of machine learning to financial time-series data, using NVIDIA (NVDA) stock as a case study.
+The objectives include:
+1. Analyzing historical OHLCV (Open, High, Low, Close, Volume) data and supporting tickers.
+2. Developing and evaluating an ensemble of machine learning models, including convolutional neural network components, to study next-day closing price patterns.
+3. Conducting hyperparameter optimization using frameworks such as Ray Tune and Optuna, with experiment tracking via Weights & Biases.
+4. Evaluating model performance using regression and financial metrics, including backtesting simulations for research purposes.
+5. Providing an interactive interface (built with Dash) to explore data, metrics, and visualizations, accessible via `app/app.py` and executed through `run.py`.
 
 ## Quick start
 
@@ -62,7 +69,7 @@ pip install -U pip
 pip install -r requirements.lock
 ```
 
-3) Provide required secrets in a `.env` at the repository root (MANDATORY before running scripts or the app):
+3) Provide required secrets in a `.env` at the repository root:
 
 Use the provided `.env.example` as a template. You can either copy it and fill values, or populate secrets from the Dash UI (recommended):
 
@@ -134,12 +141,12 @@ nocturne_bloom
 
 ```
 
-## Running common workflows
-
-- Data preparation (from the app UI): use the Data Preparation page to supply WRDS credentials and click "Prepare Data" — the app runs `src/data_loader.py`, `src/feature_engineering.py` and `src/data_module.py` in sequence.
-- Hyperparameter tuning: the Training page triggers `scripts/tune_model.py` via the UI (Ray Tune / Optuna).
-- Model training: the Training page triggers `scripts/train_model.py`.
-- Backtesting / evaluation: the Backtesting page runs `scripts/run_backtest.py` and reads results into `data/predictions/`.
+## Executing standard workflows
+The project's workflows can be accessed via the interactive interface.
+1. Data Preparation: Use the Data Preparation page to input WRDS credentials and initiate data processing. This executes src/data_loader.py, src/feature_engineering.py, and src/data_module.py to prepare financial time-series data.
+2. Hyperparameter Optimization: The Training page runs scripts/tune_model.py using Ray Tune or Optuna to explore model configurations.
+3. Model Training: The Training page executes scripts/train_model.py to train the machine learning models.
+4. Evaluation and Backtesting: The Backtesting page runs scripts/run_backtest.py to evaluate model performance and stores results in data/predictions/.
 
 If you prefer CLI, these scripts live under `scripts/` and can be invoked with the repository Python environment. Example:
 
@@ -151,9 +158,9 @@ python scripts/run_backtest.py
 ## Environment variables and secrets
 
 
-This project requires a `.env` file at the repository root. A safe-to-commit template is included as `.env.example`.
+A `.env` file at the repository root is required to store credentials securely. A safe-to-commit template is included as `.env.example`.
 
-   Use the Dash UI to pass secrets (expected flow for interactive users): the Data Preparation and Training pages include input fields for WRDS credentials and the W&B API key — submitting those forms will write the values into the repo-root `.env` file so the app and the scripts it launches can access them.
+The interactive interface allows input of credentials (e.g., `WRDS_USERNAME`, `WRDS_PASSWORD`, `WANDB_API_KEY`) through the Data Preparation and Training pages. These inputs are written to the .env file for use by the application and scripts. Credentials are stored in plain text and should be handled securely to prevent unauthorized access.
 
 ### How the UI writes `.env`
 
@@ -166,7 +173,11 @@ When you submit credentials in the Dash UI the app's callbacks read the existing
 
 ## Results
 <img src="assets/results.png" alt="results" img>
+Figure 1: NVDA Closing Prices and Predictive Model Results
+<p>This graph was prepared using data accessed via Wharton Research Data Services (WRDS). WRDS and its third-party suppliers retain all rights to the underlying data, which is considered valuable intellectual property and trade secrets. The figure is provided solely for academic and educational purposes and may not be reproduced, distributed, or used for commercial purposes without explicit permission from WRDS. It includes only derived visualizations and does not contain raw WRDS data.
 
 ## License
 
 This repository is released under the MIT License — see `LICENSE`.
+<p>Disclaimer: All code in this repository is licensed under the MIT License.
+Visualizations or results derived from WRDS data are included for academic and educational purposes only. No raw WRDS data is included. WRDS and its data providers retain all rights to the underlying data. Use of WRDS data is subject to their terms of service.
