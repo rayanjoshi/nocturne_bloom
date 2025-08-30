@@ -621,8 +621,8 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
 
                 # Calculate multi-objective score
                 metric_calculator = MultiObjectiveMetric(
-                    mae_weight=0.7,
-                    acc_weight=0.3,
+                    mae_weight=0.9,
+                    acc_weight=0.1,
                     mae_scale=1.0,
                 )
                 multi_objective_score = metric_calculator(val_mae, dir_acc_val)
