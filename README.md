@@ -33,6 +33,7 @@ A complete repository for building, evaluating, backtesting, and visualising nex
    - [Running common workflows](#running-common-workflows)
    - [Environment variables and secrets](#environment-variables-and-secrets)
    - [Long-running operations & resource notes](#long-running-operations--resource-notes)
+- [Results](#results)
 - [License](#license)
 
 ## What this repo does
@@ -160,6 +161,9 @@ When you submit credentials in the Dash UI the app's callbacks read the existing
 
 - Hyperparameter tuning (Ray Tune / Optuna) and model training are CPU/GPU heavy. Run these on a machine with a GPU or increase timeouts accordingly.
 - The UI executes training/tuning via `subprocess` calls to scripts in `scripts/`. Expect those operations to take minutes–hours depending on configuration.
+
+## Results
+<img src="assets/results.png" alt="results" img>
 
 ## License
 
