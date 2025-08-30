@@ -95,6 +95,8 @@ nocturne_bloom
 │  ├─ app.py
 │  └─ assets
 │     └─ model_architecture.png
+├─ assets
+│  └─ results.png
 ├─ cache
 ├─ configs
 │  ├─ backtest.yaml
