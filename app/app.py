@@ -329,13 +329,13 @@ def process_data_pipeline(set_progress, n_clicks):
     set_progress((str(0), str(total_scripts)))
 
     try:
+        all_success = True
         for i, (script_name, script_file) in enumerate(scripts, 1):
             status_messages.append(
                 html.P(f"Running {script_name}...",
                         style={"color": "yellow", "font-size": "0.75rem", "margin": "0.0625rem 0"}))
 
             script_path = src_dir / script_file
-            all_success = True
             # Run the script
             result = subprocess.run([
                 sys.executable, str(script_path)
