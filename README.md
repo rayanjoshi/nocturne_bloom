@@ -60,13 +60,12 @@ git clone https://github.com/rayanjoshi/nocturne_bloom.git
 cd nocturne_bloom
 ```
 
-2) Create a virtual environment and install dependencies (from `pyproject.toml`):
+2) Install dependencies using uv:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -r requirements.lock
+pip install uv
+# or on macOS: brew install uv
+uv sync --all-extras
 ```
 
 3) Provide required secrets in a `.env` at the repository root:
@@ -80,7 +79,7 @@ cp .env.example .env
 4) Run the Dash app:
 
 ```bash
-python run.py
+uv run run.py
 
 ```
 
@@ -88,7 +87,9 @@ Then open the Dash UI in your browser at the printed local address (default: htt
 
 ## Installation notes
 
-- This repository lists dependencies in `pyproject.toml` and a `requirements.lock` file. Installing from `requirements.lock` will give a stable, reproducible environment.
+- The project uses **uv** as the package manager.
+- This repository lists dependencies in `pyproject.toml` and a `uv.lock` file. Installing from `uv.lock` will give a stable, reproducible environment.
+- The lockfile has pinned dependencies due to being generated on an Intel Mac.
 - The project uses PyTorch/PyTorch Lightning, Ray Tune/Optuna, Dash + dash-bootstrap-components, and financial/data helper libraries such as `wrds`, `pandas-ta` and `backtrader`.
 
 ## Project structure
