@@ -22,7 +22,7 @@ A Machine Learning Project for Financial Time-Series Analysis
 <a href="https://github.com/pylint-dev/pylint"><img src="https://img.shields.io/badge/linting-pylint-yellowgreen?style=for-the-badge" alt="pylint"/></a>
 </p>
 
-This repository supports a project exploring machine learning techniques for financial time-series analysis by building, evaluating, backtesting, and visualising next-day closing-price predictions for NVIDIA (NVDA). The repository combines data collection and preparation, feature engineering, an ensemble of predictive models (including CNN components), hyperparameter optimisation, backtesting, and a interactive Dash app for exploration.<p>
+This repository supports a project exploring machine learning techniques for financial time-series analysis by building, evaluating, backtesting, and visualising next-day closing-price predictions for any stock. The repository combines data collection and preparation, feature engineering, an ensemble of predictive models (including CNN components), hyperparameter optimisation, backtesting, and a interactive Dash app for exploration.<p>
 
 This project is licensed under the MIT License. It uses the Wharton Research Data Services (WRDS) library, which is restricted to non-commercial academic use. Users must have a valid WRDS account and comply with [WRDS Terms of Use](https://wrds-www.wharton.upenn.edu/users/tou/). No WRDS data is included in this repository.
 
@@ -30,6 +30,7 @@ This project is licensed under the MIT License. It uses the Wharton Research Dat
 - [Academic Purpose](#academic-purpose)
 - [Research Overview](#research-overview)
 - [Quick start](#quick-start)
+- [Utilisation](#utilisation-notes)
 - [Installation](#installation-notes)
 - [Project structure](#project-structure)
 - Important workflow notes:
@@ -74,6 +75,9 @@ Use the provided `.env.example` as a template. You can either copy it and fill v
 
 ```bash
 cp .env.example .env
+
+# If populating from the Dash App:
+touch .env
 ```
 
 4) Run the Dash app:
@@ -85,14 +89,40 @@ uv run run.py
 
 Then open the Dash UI in your browser at the printed local address (default: http://127.0.0.1:8050).
 
-## Installation notes
+## Utilisation Notes
+
+Configure the stock and data range in `configs/data_loader.yaml`. Keys used by the data loader:
+
+- TICKER: stock ticker symbol (e.g., "NVDA")
+- PERMNO / GVKEY: optional identifiers for CRSP / Compustat lookups (use when available)
+- START_DATE / END_DATE: inclusive dates in YYYY-MM-DD format; START_DATE is often set to a quarter-prior to enable PE/PB calculations
+
+Example:
+
+```yaml
+data_loader:
+   TICKER: "NVDA"
+   PERMNO: 86580
+   GVKEY: 117768
+   START_DATE: "2004-10-31" # quarter-prior date to allow PE/PB calculations
+   END_DATE: "2022-12-31"
+```
+
+Notes:
+- A valid WRDS account is required for queries that use PERMNO/GVKEY; the project will not function without appropriate WRDS credentials.
+- After changing the config, re-run the Data Preparation workflow (or restart the Dash app and trigger data prep) to refresh processed data and predictions.
+- If you switch tickers, consider clearing cache/data/processed to avoid mixing prior results with new runs.
+- Dates must follow YYYY-MM-DD; missing PERMNO/GVKEY will attempt a ticker-based lookup if supported by your WRDS access.
+- All use must comply with WRDS terms; no raw WRDS data is stored in this repository.
+
+## Installation Notes
 
 - The project uses **uv** as the package manager.
 - This repository lists dependencies in `pyproject.toml` and a `uv.lock` file. Installing from `uv.lock` will give a stable, reproducible environment.
 - The lockfile has pinned dependencies due to being generated on an Intel Mac.
 - The project uses PyTorch/PyTorch Lightning, Ray Tune/Optuna, Dash + dash-bootstrap-components, and financial/data helper libraries such as `wrds`, `pandas-ta` and `backtrader`.
 
-## Project structure
+## Project Structure
 
 ```
 nocturne_bloom
