@@ -5,7 +5,7 @@ description = "Predicting NVIDIA (NVDA) stock prices using machine learning tech
 authors = [{ name = "Rayan Joshi", email = "rayanjoshi@hotmail.co.uk" }]
 readme = "README.md"
 requires-python = ">=3.12"
-license = { file = "LICENSE" }
+license = "MIT"
 
 dependencies = [
     # -------- Core ML and Deep Learning -------- #
@@ -16,43 +16,36 @@ dependencies = [
     "torchmetrics<=1.3.2",
     "scikit-learn",
     "pandas",
-    "numpy",
+    "numpy==1.26.4",
     "shap",
     "captum",
-
     # -------- Data Handling & Visualization -------- #
     "matplotlib",
     "seaborn",
     "plotly",
-
     # -------- Logging -------- #
     "wandb",
-
     # -------- Financial Data -------- #
     "wrds",
     "yfinance",
     "pandas_datareader",
-
     # -------- Backtesting & Technical Analysis -------- #
     "backtrader",
-    "pandas-ta",                 # Modern replacement for ta
+    "ta",
     "quantstats",
     "IPython",
-
     # -------- Dashboard -------- #
     "dash",
     "dash-bootstrap-components",
     "dash[diskcache]",
-
     # -------- Hyperparameter Optimization -------- #
     "ray[tune]==2.48.0",
     "optuna",
-
     # -------- Utilities -------- #
     "hydra-core",
     "omegaconf",
     "joblib",
-    "python-dotenv"
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]
