@@ -43,6 +43,7 @@ Dependencies:
     - numpy: Numerical operations for metrics.
     - scripts.logging_config: Custom logging utilities.
 """
+
 from pathlib import Path
 import joblib
 import numpy as np
@@ -57,6 +58,7 @@ from scripts.logging_config import get_logger, setup_logging
 
 setup_logging(log_level="INFO", console_output=True, file_output=True)
 logger = get_logger("model_ensemble")
+
 
 class MultiHeadCNN(nn.Module):
     """
@@ -88,58 +90,60 @@ class MultiHeadCNN(nn.Module):
         pooled_to_dir (nn.Conv1d): Projection for residual connection.
         dir_to_price (nn.Conv1d): Projection for feature alignment.
     """
+
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing CNN model with config: {cfg.cnn}")
         super().__init__()
         input_channels = cfg.cnn.input_channels
-        cnn_channels = [cfg.cnn.cnn_channels[0], cfg.cnn.cnn_channels[1], cfg.cnn.cnn_channels[2]]
+        cnn_channels = [
+            cfg.cnn.cnn_channels[0],
+            cfg.cnn.cnn_channels[1],
+            cfg.cnn.cnn_channels[2],
+        ]
         output_seq_len = cfg.data_module.output_seq_len
 
         self.cnn = nn.Sequential(
             nn.Conv1d(
-            input_channels,
-            cnn_channels[0],
-            kernel_size=cfg.cnn.kernel_size[0],
-            padding=cfg.cnn.padding[0],
+                input_channels,
+                cnn_channels[0],
+                kernel_size=cfg.cnn.kernel_size[0],
+                padding=cfg.cnn.padding[0],
             ),
             nn.BatchNorm1d(cnn_channels[0]),
             nn.ReLU(inplace=True),
             nn.MaxPool1d(
-            kernel_size=cfg.cnn.pool_size[0],
-            stride=cfg.cnn.stride,
-            padding=cfg.cnn.pool_padding[0],
+                kernel_size=cfg.cnn.pool_size[0],
+                stride=cfg.cnn.stride,
+                padding=cfg.cnn.pool_padding[0],
             ),
             nn.Dropout(cfg.cnn.dropout[0] * 0.5),
-
             nn.Conv1d(
-            cnn_channels[0],
-            cnn_channels[1],
-            kernel_size=cfg.cnn.kernel_size[1],
-            padding=cfg.cnn.padding[1],
+                cnn_channels[0],
+                cnn_channels[1],
+                kernel_size=cfg.cnn.kernel_size[1],
+                padding=cfg.cnn.padding[1],
             ),
             nn.BatchNorm1d(cnn_channels[1]),
             nn.ReLU(inplace=True),
             nn.MaxPool1d(
-            kernel_size=cfg.cnn.pool_size[1],
-            stride=cfg.cnn.stride,
-            padding=cfg.cnn.pool_padding[1],
+                kernel_size=cfg.cnn.pool_size[1],
+                stride=cfg.cnn.stride,
+                padding=cfg.cnn.pool_padding[1],
             ),
             nn.Dropout(cfg.cnn.dropout[0]),
-
             nn.Conv1d(
-            cnn_channels[1],
-            cnn_channels[2],
-            kernel_size=cfg.cnn.kernel_size[2],
-            padding=cfg.cnn.padding[2],
+                cnn_channels[1],
+                cnn_channels[2],
+                kernel_size=cfg.cnn.kernel_size[2],
+                padding=cfg.cnn.padding[2],
             ),
             nn.BatchNorm1d(cnn_channels[2]),
             nn.ReLU(inplace=True),
-
             nn.Conv1d(
-            cnn_channels[2],
-            cnn_channels[2],
-            kernel_size=cfg.cnn.kernel_size[2],
-            padding=cfg.cnn.padding[2],
+                cnn_channels[2],
+                cnn_channels[2],
+                kernel_size=cfg.cnn.kernel_size[2],
+                padding=cfg.cnn.padding[2],
             ),
             nn.BatchNorm1d(cnn_channels[2]),
             nn.ReLU(inplace=True),
@@ -156,12 +160,10 @@ class MultiHeadCNN(nn.Module):
             nn.Conv1d(cnn_channels[2], cnn_channels[1], kernel_size=1),
             nn.ReLU(),
             nn.Dropout(cfg.cnn.dropout[1] * 0.5),
-
             nn.Conv1d(cnn_channels[1], cnn_channels[1] * 2, kernel_size=1),
             nn.BatchNorm1d(cnn_channels[1] * 2),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[1]),
-
             nn.Conv1d(cnn_channels[1] * 2, cnn_channels[1], kernel_size=1),
             nn.BatchNorm1d(cnn_channels[1]),
             nn.ReLU(inplace=True),
@@ -171,7 +173,7 @@ class MultiHeadCNN(nn.Module):
             nn.Conv1d(cnn_channels[1], cnn_channels[2], kernel_size=1),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
-            nn.Conv1d(cnn_channels[2], output_seq_len, kernel_size=1)
+            nn.Conv1d(cnn_channels[2], output_seq_len, kernel_size=1),
         )
 
         num_classes = cfg.cnn.num_classes
@@ -180,18 +182,15 @@ class MultiHeadCNN(nn.Module):
             nn.BatchNorm1d(cnn_channels[2] * 2),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0] * 0.5),
-
             nn.Conv1d(cnn_channels[2] * 2, cnn_channels[2] * 2, kernel_size=1),
             nn.BatchNorm1d(cnn_channels[2] * 2),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
-
             nn.Conv1d(cnn_channels[2] * 2, cnn_channels[2], kernel_size=1),
             nn.BatchNorm1d(cnn_channels[2]),
             nn.ReLU(inplace=True),
             nn.Dropout(cfg.cnn.dropout[0]),
-
-            nn.Conv1d(cnn_channels[2], num_classes, kernel_size=1)
+            nn.Conv1d(cnn_channels[2], num_classes, kernel_size=1),
         )
 
         self.pooled_to_dir = nn.Conv1d(cnn_channels[1], cnn_channels[1], kernel_size=1)
@@ -210,7 +209,7 @@ class MultiHeadCNN(nn.Module):
         """
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
@@ -218,7 +217,9 @@ class MultiHeadCNN(nn.Module):
                 if m in self.pricehead.modules() or m in self.directionhead.modules():
                     nn.init.xavier_uniform_(m.weight)
                 else:
-                    nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                    nn.init.kaiming_normal_(
+                        m.weight, mode="fan_in", nonlinearity="relu"
+                    )
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.BatchNorm1d):
@@ -270,6 +271,7 @@ class MultiHeadCNN(nn.Module):
 
         return price_pred, direction_pred, price_features, direction_features
 
+
 class RidgeRegressor(nn.Module):
     """
     Ridge regression model with L2 regularization using PyTorch.
@@ -292,6 +294,7 @@ class RidgeRegressor(nn.Module):
         is_fitted (bool): Whether the model has been fitted.
         fallback_count (int): Number of times SVD fallback was used.
     """
+
     def __init__(self, cfg: DictConfig):
         logger.info(
             f"Initializing RidgeRegressor with alpha={cfg.ridge.alpha:.4f}, "
@@ -312,7 +315,7 @@ class RidgeRegressor(nn.Module):
         )
         self.bias = nn.Parameter(torch.zeros(self.output_seq_len), requires_grad=False)
         self.is_fitted = False
-        self.register_buffer('condition_number', torch.tensor(0.0, requires_grad=False))
+        self.register_buffer("condition_number", torch.tensor(0.0, requires_grad=False))
         self.fallback_count = 0  # Track fallback attempts
 
     def fit(self, x, y, rank=None):
@@ -328,7 +331,9 @@ class RidgeRegressor(nn.Module):
             y (torch.Tensor): Target values, shape (batch_size,) or (batch_size, output_seq_len).
             rank (Optional[int]): Truncate SVD to this rank for low-rank approximation.
         """
-        logger.info(f"Fitting RidgeRegressor on data: x shape {x.shape}, y shape {y.shape}")
+        logger.info(
+            f"Fitting RidgeRegressor on data: x shape {x.shape}, y shape {y.shape}"
+        )
 
         device = x.device
         y = y.to(device).float()
@@ -386,7 +391,7 @@ class RidgeRegressor(nn.Module):
             logger.error(f"GPU memory error during SVD: {e}")
             raise
         except RuntimeError as e:
-            self.fallback_count = getattr(self, 'fallback_count', 0) + 1
+            self.fallback_count = getattr(self, "fallback_count", 0) + 1
             count = self.fallback_count
             logger.warning(
                 f"SVD failed (count: {count}, error: {e}). "
@@ -409,7 +414,9 @@ class RidgeRegressor(nn.Module):
 
         # Validate coefficients
         if torch.any(torch.abs(theta) > 1e5):
-            logger.warning(f"Large coefficients detected: max |theta| = {torch.abs(theta).max()}")
+            logger.warning(
+                f"Large coefficients detected: max |theta| = {torch.abs(theta).max()}"
+            )
 
         # Split weight and bias - theta has shape [n_features, output_dim]
         # Assign learned parameters as nn.Parameter (not buffers)
@@ -440,7 +447,6 @@ class RidgeRegressor(nn.Module):
 
         self.is_fitted = True
 
-
     def forward(self, x):
         """
         Predict using the fitted Ridge model.
@@ -455,7 +461,9 @@ class RidgeRegressor(nn.Module):
         logger.debug(f"RidgeRegressor forward pass with input shape: {x.shape}")
 
         if not self.is_fitted:
-            raise RuntimeError("Ridge model must be fitted before forward pass. Call .fit() first.")
+            raise RuntimeError(
+                "Ridge model must be fitted before forward pass. Call .fit() first."
+            )
 
         # Flatten to 2D if needed
         if len(x.shape) == 3:
@@ -472,19 +480,20 @@ class RidgeRegressor(nn.Module):
 
         return predictions
 
+
 class LSTMClassifier(nn.Module):
     """
     A bidirectional LSTM-based classifier for time series data.
-    
-    This model projects input features, applies a multi-layer bidirectional LSTM, 
+
+    This model projects input features, applies a multi-layer bidirectional LSTM,
     and feeds the output through a fully connected network to perform classification.
-    
+
     Includes:
         - Input projection to match LSTM dimensionality.
         - Layer normalization and residual connections.
         - Xavier initialization for stability.
         - Final dense layers for class prediction.
-    
+
     Args:
         cfg (DictConfig): Configuration object containing model parameters:
             - cfg.lstm.hidden_size (int): Hidden dimension size of the LSTM.
@@ -493,6 +502,7 @@ class LSTMClassifier(nn.Module):
             - cfg.cnn.input_channels (int): Dimensionality of input features.
             - cfg.cnn.num_classes (int): Number of output classes.
     """
+
     def __init__(self, cfg: DictConfig):
         logger.info(
             f"Initializing LSTMClassifier with hidden_size={cfg.lstm.hidden_size}, "
@@ -516,7 +526,7 @@ class LSTMClassifier(nn.Module):
             num_layers=self.num_layers,
             batch_first=True,
             dropout=self.dropout if self.num_layers > 1 else 0.0,
-            bidirectional=True  # Enable bidirectional processing
+            bidirectional=True,  # Enable bidirectional processing
         )
 
         # Layer normalization
@@ -527,7 +537,7 @@ class LSTMClassifier(nn.Module):
             nn.Linear(self.hidden_size * 2, self.hidden_size),  # *2 for bidirectional
             nn.ReLU(),
             nn.Dropout(self.dropout),
-            nn.Linear(self.hidden_size, self.num_classes)
+            nn.Linear(self.hidden_size, self.num_classes),
         )
 
         self._initialize_weights()
@@ -535,11 +545,11 @@ class LSTMClassifier(nn.Module):
     def _initialize_weights(self):
         """
         Initialize weights of all submodules in the network.
-        
+
         - Linear and LSTM weights are initialized using Xavier uniform.
         - Biases are initialized to zero.
         - LayerNorm weights initialized to 1.0 and biases to 0.0.
-        
+
         Improves training stability and convergence.
         """
         for m in self.modules():
@@ -549,7 +559,7 @@ class LSTMClassifier(nn.Module):
                     nn.init.constant_(m.bias, 0.0)
             elif isinstance(m, nn.LSTM):
                 for name, param in m.named_parameters():
-                    if 'bias' in name:
+                    if "bias" in name:
                         nn.init.constant_(param, 0.0)
                     # Leave LSTM weights with default initialization
             elif isinstance(m, nn.LayerNorm):
@@ -559,10 +569,10 @@ class LSTMClassifier(nn.Module):
     def forward(self, x):
         """
         Perform a forward pass through the LSTM classifier.
-        
+
         Args:
             x (torch.Tensor): Input tensor of shape (batch_size, seq_len, input_size).
-        
+
         Returns:
             torch.Tensor: Output class logits of shape (batch_size, num_classes).
                         Note: Returns single prediction per batch, not per timestep.
@@ -570,8 +580,12 @@ class LSTMClassifier(nn.Module):
         logger.debug(f"LSTMClassifier forward pass with input shape: {x.shape}")
         batch_size = x.size(0)
         x = self.input_projection(x)  # (batch_size, seq_len, hidden_size)
-        h0 = torch.zeros(self.num_layers * 2, batch_size, self.hidden_size, device=x.device)
-        c0 = torch.zeros(self.num_layers * 2, batch_size, self.hidden_size, device=x.device)
+        h0 = torch.zeros(
+            self.num_layers * 2, batch_size, self.hidden_size, device=x.device
+        )
+        c0 = torch.zeros(
+            self.num_layers * 2, batch_size, self.hidden_size, device=x.device
+        )
         out, _ = self.lstm(x, (h0, c0))  # (batch_size, seq_len, hidden_size * 2)
         out = self.norm(out)
         residual = self.res_proj(x)  # (batch_size, seq_len, hidden_size * 2)
@@ -591,6 +605,7 @@ class MetaPriceRegressor(nn.Module):
     """
     A linear regressor that combines outputs from multiple base models.
     """
+
     def __init__(self, in_dim: int, output_seq_len: int):
         super().__init__()
         self.output_seq_len = output_seq_len
@@ -599,14 +614,15 @@ class MetaPriceRegressor(nn.Module):
     def forward(self, z):
         """
         Forward pass for the price regressor.
-        
+
         Args:
             z (torch.Tensor): Input tensor of shape (batch_size, in_dim).
-        
+
         Returns:
             torch.Tensor: Predicted price values of shape (batch_size, output_seq_len).
         """
         return self.linear(z)
+
 
 class FocalLoss(nn.Module):
     """
@@ -631,13 +647,22 @@ class FocalLoss(nn.Module):
         num_classes (int): Number of classes.
         eps (float): Numerical stability constant.
     """
-    def __init__(self, num_classes: int, class_counts: torch.Tensor = None,
-                    gamma: float = 1.5, beta: float = 0.9999,
-                    reduction: str = 'mean', eps: float = 1e-8):
+
+    def __init__(
+        self,
+        num_classes: int,
+        class_counts: torch.Tensor = None,
+        gamma: float = 1.5,
+        beta: float = 0.9999,
+        reduction: str = "mean",
+        eps: float = 1e-8,
+    ):
         super().__init__()
         # Validate inputs
         if not isinstance(num_classes, int) or num_classes < 1:
-            raise ValueError(f"num_classes must be a positive integer, got {num_classes}")
+            raise ValueError(
+                f"num_classes must be a positive integer, got {num_classes}"
+            )
         # Allow None class_counts (fallback to uniform)
         if class_counts is None:
             class_counts = torch.ones(num_classes, dtype=torch.float32)
@@ -654,8 +679,10 @@ class FocalLoss(nn.Module):
             class_counts = torch.ones(num_classes, dtype=torch.float32)
         if (class_counts < 0).any():
             raise ValueError("class_counts must be non-negative")
-        if reduction not in ['mean', 'sum', 'none']:
-            raise ValueError(f"Invalid reduction: {reduction}. Must be 'mean', 'sum', or 'none'.")
+        if reduction not in ["mean", "sum", "none"]:
+            raise ValueError(
+                f"Invalid reduction: {reduction}. Must be 'mean', 'sum', or 'none'."
+            )
 
         # Calculate effective weights using effective number of samples
         effective_num = 1.0 - torch.pow(beta, class_counts)
@@ -668,7 +695,7 @@ class FocalLoss(nn.Module):
         logger.info(f"Calculated class weights: {weights.tolist()}")
 
         # Register weights as buffer to ensure device consistency
-        self.register_buffer('alpha', weights)
+        self.register_buffer("alpha", weights)
         self.gamma = gamma
         self.reduction = reduction
         self.num_classes = num_classes
@@ -695,31 +722,35 @@ class FocalLoss(nn.Module):
                 f"(batch_size, {self.num_classes}), got {inputs.shape}"
             )
         if targets.dim() != 1 or targets.size(0) != inputs.size(0):
-            raise ValueError(f"Expected targets of shape (batch_size,), got {targets.shape}")
+            raise ValueError(
+                f"Expected targets of shape (batch_size,), got {targets.shape}"
+            )
         if (targets < 0).any() or (targets >= self.num_classes).any():
-            raise ValueError(f"Targets must be in range [0, {self.num_classes-1}]")
+            raise ValueError(f"Targets must be in range [0, {self.num_classes - 1}]")
 
-        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        ce_loss = F.cross_entropy(inputs, targets, reduction="none")
         pt = torch.exp(-ce_loss).clamp(min=self.eps, max=1.0)
         alpha_t = self.alpha[targets]
         focal_loss = alpha_t * (1 - pt) ** self.gamma * ce_loss
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return focal_loss.mean()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return focal_loss.sum()
         return focal_loss
+
 
 class OrthogonalLoss(nn.Module):
     """
     Encourages orthogonality between feature representations.
-    
+
     Designed to reduce correlation between price and directional feature embeddings
     by penalizing cosine similarity.
-    
+
     Args:
         lambda_ortho (float): Scaling factor for the orthogonality penalty (default: 1.0).
     """
+
     def __init__(self, lambda_ortho=1.0):
         super().__init__()
         self.lambda_ortho = lambda_ortho
@@ -727,11 +758,11 @@ class OrthogonalLoss(nn.Module):
     def forward(self, price_features, direction_features):
         """
         Compute the orthogonality penalty between two feature vectors.
-        
+
         Args:
             price_features (torch.Tensor): Tensor of shape (batch_size, feature_dim).
             direction_features (torch.Tensor): Tensor of shape (batch_size, feature_dim).
-        
+
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
                 - penalty (torch.Tensor): Scalar loss encouraging orthogonality.
@@ -759,6 +790,7 @@ class DirectionalAccuracy(Metric):
         prev_pred (list or torch.Tensor): Previous batch predictions for calculating changes.
         prev_target (list or torch.Tensor): Previous batch targets for calculating changes.
     """
+
     higher_is_better = True
 
     def __init__(self, **kwargs):
@@ -855,6 +887,7 @@ class DirectionalAccuracy(Metric):
         self.prev_pred = []
         self.prev_target = []
 
+
 class EnsembleModule(L.LightningModule):
     """
     PyTorch Lightning module for ensembling CNN, Ridge, and LSTM models.
@@ -889,6 +922,7 @@ class EnsembleModule(L.LightningModule):
             ridge_fitted (bool): Whether Ridge model is fitted.
             class_counts (torch.Tensor): Class frequencies for Focal Loss.
     """
+
     def __init__(self, cfg: DictConfig):
         logger.info(f"Initializing EnsembleModule with config: {cfg.model}")
         super().__init__()
@@ -921,13 +955,14 @@ class EnsembleModule(L.LightningModule):
 
         # Loss functions
         self.price_criterion = nn.HuberLoss(delta=cfg.model.huber_delta)
-        self.direction_criterion = FocalLoss(num_classes=self.num_classes,
-                                                class_counts=None,
-                                                gamma=cfg.model.focal_gamma,
-                                                beta=cfg.model.focal_beta,
-                                                reduction='mean',
-                                                eps=1e-8
-                                                )
+        self.direction_criterion = FocalLoss(
+            num_classes=self.num_classes,
+            class_counts=None,
+            gamma=cfg.model.focal_gamma,
+            beta=cfg.model.focal_beta,
+            reduction="mean",
+            eps=1e-8,
+        )
         self.orthogonal_loss = OrthogonalLoss(lambda_ortho=cfg.model.orthogonal_lambda)
 
         self.class_counts = None
@@ -972,22 +1007,26 @@ class EnsembleModule(L.LightningModule):
                 ridge_price = self.ridge(x)
                 if ridge_price.dim() > 1:
                     ridge_price = ridge_price.squeeze(-1)  # Ensure 1D
-            except (RuntimeError,
-                    ValueError,
-                    TypeError,
-                    IndexError,
-                    torch.cuda.OutOfMemoryError) as e:
+            except (
+                RuntimeError,
+                ValueError,
+                TypeError,
+                IndexError,
+                torch.cuda.OutOfMemoryError,
+            ) as e:
                 logger.warning(f"Ridge prediction failed in meta-features: {e}")
 
         lstm_logits = torch.zeros(batch_size, self.num_classes, device=device)
         try:
             lstm_logits = self.lstm(x)  # Should be (batch_size, num_classes)
             lstm_probs = F.softmax(lstm_logits, dim=1)
-        except (RuntimeError,
-                ValueError,
-                TypeError,
-                IndexError,
-                torch.cuda.OutOfMemoryError) as e:
+        except (
+            RuntimeError,
+            ValueError,
+            TypeError,
+            IndexError,
+            torch.cuda.OutOfMemoryError,
+        ) as e:
             logger.warning(f"LSTM prediction failed in meta-features: {e}")
             lstm_probs = torch.zeros(batch_size, self.num_classes, device=device)
 
@@ -995,7 +1034,9 @@ class EnsembleModule(L.LightningModule):
         if cnn_price.dim() > 1:
             cnn_price = cnn_price.squeeze(-1)
 
-        dir_entropy = -torch.sum(cnn_dir_probs * torch.log(cnn_dir_probs + 1e-10), dim=1)
+        dir_entropy = -torch.sum(
+            cnn_dir_probs * torch.log(cnn_dir_probs + 1e-10), dim=1
+        )
 
         price_diff = torch.abs(cnn_price - ridge_price)
         price_mean = (cnn_price + ridge_price) / 2
@@ -1014,17 +1055,20 @@ class EnsembleModule(L.LightningModule):
 
         price_direction_confidence = direction_confidence * torch.abs(cnn_price)
 
-        z_price = torch.stack([
-            cnn_price.squeeze(-1) if cnn_price.dim() > 1 else cnn_price,
-            ridge_price.squeeze(-1) if ridge_price.dim() > 1 else ridge_price,
-            dir_entropy,
-            price_disagreement,
-            dir_kl_div,
-            direction_confidence,
-            weighted_direction_signal,
-            cosine_similarity,
-            price_direction_confidence,
-        ], dim=1)
+        z_price = torch.stack(
+            [
+                cnn_price.squeeze(-1) if cnn_price.dim() > 1 else cnn_price,
+                ridge_price.squeeze(-1) if ridge_price.dim() > 1 else ridge_price,
+                dir_entropy,
+                price_disagreement,
+                dir_kl_div,
+                direction_confidence,
+                weighted_direction_signal,
+                cosine_similarity,
+                price_direction_confidence,
+            ],
+            dim=1,
+        )
         return z_price
 
     def forward(self, *args, **kwargs):
@@ -1050,7 +1094,9 @@ class EnsembleModule(L.LightningModule):
         _unused = kwargs
         logger.debug(f"EnsembleModule forward pass with input shape: {x.shape}")
 
-        cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
+        cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(
+            x
+        )
 
         if self.use_meta_learning:
             z_price = self.build_meta_features(x, cnn_price, cnn_direction_logits)
@@ -1058,7 +1104,7 @@ class EnsembleModule(L.LightningModule):
             meta_price = self.meta_price(z_price)
 
             final_price = torch.clamp(meta_price, min=-1e6, max=1e6)
-            final_direction = cnn_direction_logits # for supervised learning only
+            final_direction = cnn_direction_logits  # for supervised learning only
         else:
             ridge_price = torch.zeros_like(cnn_price)
             if self.ridge_fitted and self.ridge.is_fitted:
@@ -1066,11 +1112,13 @@ class EnsembleModule(L.LightningModule):
                     ridge_price = self.ridge(x)
                     if ridge_price.device != cnn_price.device:
                         ridge_price = ridge_price.to(cnn_price.device)
-                except (RuntimeError,
-                        ValueError,
-                        TypeError,
-                        IndexError,
-                        torch.cuda.OutOfMemoryError) as e:
+                except (
+                    RuntimeError,
+                    ValueError,
+                    TypeError,
+                    IndexError,
+                    torch.cuda.OutOfMemoryError,
+                ) as e:
                     logger.warning(f"Ridge prediction failed: {e}")
 
             lstm_direction = torch.zeros_like(cnn_direction_logits)
@@ -1078,22 +1126,28 @@ class EnsembleModule(L.LightningModule):
                 lstm_direction = self.lstm(x)
                 if lstm_direction.device != cnn_direction_logits.device:
                     lstm_direction = lstm_direction.to(cnn_direction_logits.device)
-            except (RuntimeError,
-                    ValueError,
-                    TypeError,
-                    IndexError,
-                    torch.cuda.OutOfMemoryError) as e:
+            except (
+                RuntimeError,
+                ValueError,
+                TypeError,
+                IndexError,
+                torch.cuda.OutOfMemoryError,
+            ) as e:
                 logger.warning(f"LSTM prediction failed: {e}")
 
             if ridge_price is not None:
-                final_price = (self.price_cnn_weight * cnn_price +
-                             self.price_ridge_weight * ridge_price)
+                final_price = (
+                    self.price_cnn_weight * cnn_price
+                    + self.price_ridge_weight * ridge_price
+                )
             else:
                 final_price = cnn_price
 
             if lstm_direction is not None:
-                final_direction = (self.direction_cnn_weight * cnn_direction_logits +
-                                 self.direction_lstm_weight * lstm_direction)
+                final_direction = (
+                    self.direction_cnn_weight * cnn_direction_logits
+                    + self.direction_lstm_weight * lstm_direction
+                )
             else:
                 final_direction = cnn_direction_logits
 
@@ -1104,7 +1158,7 @@ class EnsembleModule(L.LightningModule):
     def on_train_start(self):
         """
         Operations to perform at the beginning of training.
-        
+
         - Computes class frequencies for Focal Loss.
         - Fits the Ridge model on the full training set.
         """
@@ -1122,16 +1176,18 @@ class EnsembleModule(L.LightningModule):
         unique, counts = torch.unique(all_labels, return_counts=True)
         self.class_counts = counts.to(device)
 
-        logger.info(f"Class distribution: {dict(zip(unique.tolist(), counts.tolist()))}")
+        logger.info(
+            f"Class distribution: {dict(zip(unique.tolist(), counts.tolist()))}"
+        )
         logger.info(f"Class imbalance ratio: {float(counts.max() / counts.min()):.2f}")
 
         self.direction_criterion = FocalLoss(
             num_classes=self.num_classes,
             class_counts=self.class_counts,
             gamma=self.cfg.model.focal_gamma,
-            beta=self.cfg.model.get('focal_beta', 0.9999),
-            reduction='mean',
-            eps=1e-8
+            beta=self.cfg.model.get("focal_beta", 0.9999),
+            reduction="mean",
+            eps=1e-8,
         ).to(device)
 
         logger.info("Fitting Ridge on training data...")
@@ -1159,13 +1215,13 @@ class EnsembleModule(L.LightningModule):
     def training_step(self, *args, **kwargs):
         """
         Perform a single training step.
-        
+
         Computes predictions, losses, and updates metrics.
-        
+
         Args:
             batch (Tuple[torch.Tensor]): A batch containing (x, price_y, direction_y).
             batch_idx (int): Index of the current batch.
-        
+
         Returns:
             torch.Tensor: Total loss for the batch.
         """
@@ -1185,16 +1241,24 @@ class EnsembleModule(L.LightningModule):
         if self.include_base_losses:
             cnn_price, cnn_direction_logits, _, _ = self.cnn(x)
             base_price_loss = self.price_criterion(cnn_price, price_y)
-            base_direction_loss = self.direction_criterion(cnn_direction_logits, direction_y)
-            base_losses = (self.price_loss_weight * base_price_loss +
-                            self.direction_loss_weight * base_direction_loss)
+            base_direction_loss = self.direction_criterion(
+                cnn_direction_logits, direction_y
+            )
+            base_losses = (
+                self.price_loss_weight * base_price_loss
+                + self.direction_loss_weight * base_direction_loss
+            )
 
-        orthogonal_penalty, cosine_sim = self.orthogonal_loss(price_features, direction_features)
+        orthogonal_penalty, cosine_sim = self.orthogonal_loss(
+            price_features, direction_features
+        )
 
-        total_loss = (self.price_loss_weight * price_loss +
-                        self.direction_loss_weight * direction_loss +
-                        base_losses + orthogonal_penalty
-                    )
+        total_loss = (
+            self.price_loss_weight * price_loss
+            + self.direction_loss_weight * direction_loss
+            + base_losses
+            + orthogonal_penalty
+        )
 
         # Update metrics
         self.mae_train.update(price_pred, price_y)
@@ -1203,23 +1267,25 @@ class EnsembleModule(L.LightningModule):
         self.dir_acc_train.update(price_pred, price_y)
 
         # Log losses
-        self.log('train_loss', total_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log('train_price_loss', price_loss, on_step=True, on_epoch=True)
-        self.log('train_direction_loss', direction_loss, on_step=True, on_epoch=True)
-        self.log('train_cosine_sim', torch.mean(cosine_sim), on_step=True, on_epoch=True)
+        self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train_price_loss", price_loss, on_step=True, on_epoch=True)
+        self.log("train_direction_loss", direction_loss, on_step=True, on_epoch=True)
+        self.log(
+            "train_cosine_sim", torch.mean(cosine_sim), on_step=True, on_epoch=True
+        )
         if self.include_base_losses:
-            self.log('train_base_losses', base_losses, on_step=True, on_epoch=True)
+            self.log("train_base_losses", base_losses, on_step=True, on_epoch=True)
 
         return total_loss
 
     def validation_step(self, *args, **kwargs):
         """
         Perform a single validation step.
-        
+
         Args:
             batch (Tuple[torch.Tensor]): A batch containing (x, price_y, direction_y).
             batch_idx (int): Index of the current batch.
-        
+
         Returns:
             torch.Tensor: Total validation loss.
         """
@@ -1239,17 +1305,25 @@ class EnsembleModule(L.LightningModule):
         if self.include_base_losses:
             cnn_price, cnn_direction_logits, _, _ = self.cnn(x)
             base_price_loss = self.price_criterion(cnn_price, price_y)
-            base_direction_loss = self.direction_criterion(cnn_direction_logits, direction_y)
-            base_losses = (self.price_loss_weight * base_price_loss +
-                            self.direction_loss_weight * base_direction_loss)
+            base_direction_loss = self.direction_criterion(
+                cnn_direction_logits, direction_y
+            )
+            base_losses = (
+                self.price_loss_weight * base_price_loss
+                + self.direction_loss_weight * base_direction_loss
+            )
 
-        orthogonal_penalty, cosine_sim = self.orthogonal_loss(price_features, direction_features)
+        orthogonal_penalty, cosine_sim = self.orthogonal_loss(
+            price_features, direction_features
+        )
 
         # Total loss
-        total_loss = (self.price_loss_weight * price_loss +
-                        self.direction_loss_weight * direction_loss +
-                        base_losses + orthogonal_penalty
-                    )
+        total_loss = (
+            self.price_loss_weight * price_loss
+            + self.direction_loss_weight * direction_loss
+            + base_losses
+            + orthogonal_penalty
+        )
 
         # Update metrics
         self.mae_val.update(price_pred, price_y)
@@ -1258,19 +1332,19 @@ class EnsembleModule(L.LightningModule):
         self.dir_acc_val.update(price_pred, price_y)
 
         # Log losses
-        self.log('val_loss', total_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_price_loss', price_loss, on_step=False, on_epoch=True)
-        self.log('val_direction_loss', direction_loss, on_step=False, on_epoch=True)
-        self.log('val_cosine_sim', torch.mean(cosine_sim), on_step=False, on_epoch=True)
+        self.log("val_loss", total_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val_price_loss", price_loss, on_step=False, on_epoch=True)
+        self.log("val_direction_loss", direction_loss, on_step=False, on_epoch=True)
+        self.log("val_cosine_sim", torch.mean(cosine_sim), on_step=False, on_epoch=True)
         if self.include_base_losses:
-            self.log('val_base_losses', base_losses, on_step=False, on_epoch=True)
+            self.log("val_base_losses", base_losses, on_step=False, on_epoch=True)
 
         return total_loss
 
     def on_train_epoch_end(self):
         """
         Computes and logs training metrics at the end of each training epoch.
-        
+
         Resets metric objects after logging.
         """
         logger.info("Training epoch ended. Computing training metrics.")
@@ -1282,21 +1356,25 @@ class EnsembleModule(L.LightningModule):
 
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent
-        scaler_path = (repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)).resolve()
+        scaler_path = (
+            repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)
+        ).resolve()
         target_scaler = joblib.load(scaler_path)
         price_mae_np = np.array([[price_mae]])
         price_mae = target_scaler.inverse_transform(price_mae_np)[0, 0]
         price_wmape = price_wmape * 100
 
-        self.log('train_price_mae', price_mae, prog_bar=True)
-        self.log('train_price_wmape', price_wmape, prog_bar=True)
-        self.log('train_price_r2', price_r2, prog_bar=True)
-        self.log('train_dir_acc', dir_acc, prog_bar=True)
+        self.log("train_price_mae", price_mae, prog_bar=True)
+        self.log("train_price_wmape", price_wmape, prog_bar=True)
+        self.log("train_price_r2", price_r2, prog_bar=True)
+        self.log("train_dir_acc", dir_acc, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Training Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}")
+        logger.info(
+            f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}"
+        )
         logger.info(f"Direction - Accuracy: {dir_acc:.4f}")
         logger.info(f"Models Fitted - Ridge: {self.ridge_fitted}")
         logger.info("--------- Training Complete ---------\n")
@@ -1310,7 +1388,7 @@ class EnsembleModule(L.LightningModule):
     def on_validation_epoch_end(self):
         """
         Computes and logs validation metrics at the end of each validation epoch.
-        
+
         Resets metric objects after logging.
         """
         logger.info("Validation epoch ended. Computing validation metrics.")
@@ -1322,21 +1400,25 @@ class EnsembleModule(L.LightningModule):
 
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent
-        scaler_path = (repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)).resolve()
+        scaler_path = (
+            repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)
+        ).resolve()
         target_scaler = joblib.load(scaler_path)
         price_mae_np = np.array([[price_mae]])
         price_mae = target_scaler.inverse_transform(price_mae_np)[0, 0]
         price_wmape = price_wmape * 100
 
-        self.log('val_price_mae', price_mae, prog_bar=True)
-        self.log('val_price_wmape', price_wmape, prog_bar=True)
-        self.log('val_price_r2', price_r2, prog_bar=True)
-        self.log('val_dir_acc', dir_acc, prog_bar=True)
+        self.log("val_price_mae", price_mae, prog_bar=True)
+        self.log("val_price_wmape", price_wmape, prog_bar=True)
+        self.log("val_price_r2", price_r2, prog_bar=True)
+        self.log("val_dir_acc", dir_acc, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Validation Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}")
+        logger.info(
+            f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}"
+        )
         logger.info(f"Direction - Accuracy: {dir_acc:.4f}")
         logger.info("--------- Validation Complete ---------\n")
 
@@ -1349,11 +1431,11 @@ class EnsembleModule(L.LightningModule):
     def test_step(self, *args, **kwargs):
         """
         Run a test step (delegated to the validation step).
-        
+
         Args:
             batch (Tuple[torch.Tensor]): A batch from the test set.
             batch_idx (int): Index of the current test batch.
-        
+
         Returns:
             torch.Tensor: Total test loss.
         """
@@ -1366,7 +1448,7 @@ class EnsembleModule(L.LightningModule):
     def on_test_epoch_end(self):
         """
         Computes and logs test metrics at the end of the test epoch.
-        
+
         Resets metric objects after logging.
         """
         logger.info("Test epoch ended. Computing test metrics.")
@@ -1377,20 +1459,24 @@ class EnsembleModule(L.LightningModule):
 
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent
-        scaler_path = (repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)).resolve()
+        scaler_path = (
+            repo_root / Path(self.cfg.data_module.price_y_scaled_save_path)
+        ).resolve()
         target_scaler = joblib.load(scaler_path)
         price_mae_np = np.array([[price_mae]])
         price_mae = target_scaler.inverse_transform(price_mae_np)[0, 0]
         price_wmape = price_wmape * 100
 
-        self.log('test_price_mae', price_mae, prog_bar=True)
-        self.log('test_price_wmape', price_wmape, prog_bar=True)
-        self.log('test_price_r2', price_r2, prog_bar=True)
+        self.log("test_price_mae", price_mae, prog_bar=True)
+        self.log("test_price_wmape", price_wmape, prog_bar=True)
+        self.log("test_price_r2", price_r2, prog_bar=True)
 
         meta_status = "enabled" if self.use_meta_learning else "disabled"
         logger.info("--------- Test Results ---------")
         logger.info(f"Meta-learning: {meta_status}")
-        logger.info(f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}")
+        logger.info(
+            f"Price - MAE: ${price_mae:.2f}, WMAPE: {price_wmape:.2f}%, R²: {price_r2:.4f}"
+        )
         logger.info("--------- Test Complete ---------\n")
 
         # Reset metrics
@@ -1402,16 +1488,18 @@ class EnsembleModule(L.LightningModule):
     def get_base_predictions(self, x):
         """
         Retrieve predictions from all base models.
-        
+
         Args:
             x (torch.Tensor): Input features.
-        
+
         Returns:
             dict: Dictionary containing predictions and features from CNN, Ridge, and LSTM.
         """
         with torch.no_grad():
             # CNN predictions
-            cnn_price, cnn_direction_logits, price_features, direction_features = self.cnn(x)
+            cnn_price, cnn_direction_logits, price_features, direction_features = (
+                self.cnn(x)
+            )
             cnn_direction_probs = F.softmax(cnn_direction_logits, dim=1)
 
             # Ridge predictions
@@ -1419,11 +1507,13 @@ class EnsembleModule(L.LightningModule):
             if self.ridge_fitted and self.ridge.is_fitted:
                 try:
                     ridge_price = self.ridge(x)
-                except (RuntimeError,
-                        ValueError,
-                        TypeError,
-                        IndexError,
-                        torch.cuda.OutOfMemoryError) as e:
+                except (
+                    RuntimeError,
+                    ValueError,
+                    TypeError,
+                    IndexError,
+                    torch.cuda.OutOfMemoryError,
+                ) as e:
                     logger.warning(f"Ridge prediction failed: {e}")
 
             lstm_logits = None
@@ -1431,54 +1521,58 @@ class EnsembleModule(L.LightningModule):
             try:
                 lstm_logits = self.lstm(x)
                 lstm_probs = F.softmax(lstm_logits, dim=1)
-            except (RuntimeError,
-                    ValueError,
-                    TypeError,
-                    IndexError,
-                    torch.cuda.OutOfMemoryError) as e:
+            except (
+                RuntimeError,
+                ValueError,
+                TypeError,
+                IndexError,
+                torch.cuda.OutOfMemoryError,
+            ) as e:
                 logger.warning(f"LSTM prediction failed: {e}")
 
             return {
-                'cnn_price': cnn_price,
-                'cnn_direction_logits': cnn_direction_logits,
-                'cnn_direction_probs': cnn_direction_probs,
-                'ridge_price': ridge_price,
-                'lstm_logits': lstm_logits,
-                'lstm_probs': lstm_probs,
-                'price_features': price_features,
-                'direction_features': direction_features
+                "cnn_price": cnn_price,
+                "cnn_direction_logits": cnn_direction_logits,
+                "cnn_direction_probs": cnn_direction_probs,
+                "ridge_price": ridge_price,
+                "lstm_logits": lstm_logits,
+                "lstm_probs": lstm_probs,
+                "price_features": price_features,
+                "direction_features": direction_features,
             }
 
     def get_meta_predictions(self, x):
         """
         Retrieve predictions from the price meta-learner.
-        
+
         Args:
             x (torch.Tensor): Input features, shape (batch_size, seq_len, input_channels).
-        
+
         Returns:
             dict: Dictionary containing meta-learner price predictions and features, with keys:
                 - 'meta_price': Price predictions, shape (batch_size, output_seq_len).
                 - 'meta_features_price': Meta-features for price, shape (batch_size, 9).
         """
         if not self.use_meta_learning:
-            raise ValueError("Meta-learning is disabled. Use get_base_predictions() instead.")
+            raise ValueError(
+                "Meta-learning is disabled. Use get_base_predictions() instead."
+            )
 
         with torch.no_grad():
             cnn_price, cnn_direction_logits, _, _ = self.cnn(x)
-            z_price= self.build_meta_features(x, cnn_price, cnn_direction_logits)
+            z_price = self.build_meta_features(x, cnn_price, cnn_direction_logits)
 
             meta_price = self.meta_price(z_price)
 
             return {
-                'meta_price': meta_price,
-                'meta_features_price': z_price,
+                "meta_price": meta_price,
+                "meta_features_price": z_price,
             }
 
     def save_components(self):
         """
         Save model components (CNN, Ridge, LSTM, and meta-learner if used) to disk.
-        
+
         Saves model state dictionaries to paths specified in the configuration.
         Ensures parent directories exist before saving.
         """
@@ -1517,10 +1611,10 @@ class EnsembleModule(L.LightningModule):
     def configure_optimizers(self):
         """
         Configure optimizer and LR scheduler.
-        
+
         Uses Adam with separate learning rates for base models and an optional
         meta-learner. Scheduler is ReduceLROnPlateau monitoring 'val_loss'.
-        
+
         Returns:
             dict: {'optimizer', 'lr_scheduler', 'monitor'}.
         """
@@ -1534,16 +1628,16 @@ class EnsembleModule(L.LightningModule):
 
         # Set learning rates
         base_lr = self.cfg.optimiser.base_lr
-        param_groups = [{'params': base_params, 'lr': base_lr}]
+        param_groups = [{"params": base_params, "lr": base_lr}]
 
         if meta_params:
             meta_lr = self.cfg.optimiser.meta_lr
-            param_groups.append({'params': meta_params, 'lr': meta_lr})
+            param_groups.append({"params": meta_params, "lr": meta_lr})
 
         optimizer = torch.optim.Adam(
             param_groups,
             weight_decay=self.cfg.optimiser.weight_decay,
-            eps=self.cfg.optimiser.eps
+            eps=self.cfg.optimiser.eps,
         )
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -1551,11 +1645,11 @@ class EnsembleModule(L.LightningModule):
             mode=self.cfg.optimiser.scheduler_mode,
             factor=self.cfg.optimiser.scheduler_factor,
             patience=self.cfg.optimiser.scheduler_patience,
-            min_lr=self.cfg.optimiser.scheduler_min_lr
+            min_lr=self.cfg.optimiser.scheduler_min_lr,
         )
 
         return {
-            'optimizer': optimizer,
-            'lr_scheduler': scheduler,
-            'monitor': 'val_loss',
+            "optimizer": optimizer,
+            "lr_scheduler": scheduler,
+            "monitor": "val_loss",
         }
