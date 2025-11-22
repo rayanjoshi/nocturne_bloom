@@ -131,11 +131,23 @@ nocturne_bloom
 ├─ app
 │  ├─ __init__.py
 │  ├─ app.py
-│  └─ assets
-│     └─ model_architecture.png
+│  ├─ assets
+│  │  ├─ css
+│  │  │  └─ custom.css
+│  │  └─ model_architecture.png
+│  ├─ cache
+│  │  └─ cache.db
+│  ├─ layout
+│  │  ├─ __init__.py
+│  │  └─ sidebar.py
+│  └─ pages
+│     ├─ __init__.py
+│     ├─ backtesting.py
+│     ├─ data_preparation.py
+│     ├─ home.py
+│     └─ training.py
 ├─ assets
 │  └─ results.png
-├─ cache
 ├─ configs
 │  ├─ backtest.yaml
 │  ├─ config.yaml
@@ -152,7 +164,6 @@ nocturne_bloom
 ├─ models
 │  └─ scalers
 ├─ pyproject.toml
-├─ requirements.lock
 ├─ run.py
 ├─ scripts
 │  ├─ __init__.py
@@ -162,13 +173,14 @@ nocturne_bloom
 │  ├─ run_backtest.py
 │  ├─ train_model.py
 │  └─ tune_model.py
-└─ src
-   ├─ WRDS_query.sql
-   ├─ __init__.py
-   ├─ data_loader.py
-   ├─ data_module.py
-   ├─ feature_engineering.py
-   └─ model_ensemble.py
+├─ src
+│  ├─ WRDS_query.sql
+│  ├─ __init__.py
+│  ├─ data_loader.py
+│  ├─ data_module.py
+│  ├─ feature_engineering.py
+│  └─ model_ensemble.py
+└─ uv.lock
 
 ```
 
