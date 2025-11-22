@@ -234,4 +234,4 @@ logs/*
 *.egg-info
 outputs/
 .env
-/cache
+*/cache*
