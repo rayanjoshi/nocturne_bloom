@@ -76,8 +76,6 @@ Use the provided `.env.example` as a template. You can either copy it and fill v
 ```bash
 cp .env.example .env
 
-# If populating from the Dash App:
-touch .env
 ```
 
 4) Run the Dash app:
