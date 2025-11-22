@@ -35,9 +35,15 @@ try:
         logger.info(f"Running {str(script_name)}...")
 
         script_path = src_dir / script_file
-        # Run the script
-        command = [sys.executable, str(script_path)]
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        # If the script is inside a package (e.g. app/app.py), run it as a module
+        if script_path.parent.name and script_path.suffix == '.py':
+            module_name = f"{script_path.parent.name}.{script_path.stem}"
+            command = [sys.executable, '-m', module_name]
+        else:
+            # Run the script file directly
+            command = [sys.executable, str(script_path)]
+
+        result = subprocess.run(command, check=True, capture_output=True, text=True, cwd=repo_root)
 except subprocess.CalledProcessError as e:
     logger.error(f"Error occurred while running {str(script_name)}: {e.stderr}")
     sys.exit(1)
