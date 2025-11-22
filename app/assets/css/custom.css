@@ -1,0 +1,179 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: #1a1a1a;
+    color: white;
+}
+
+#react-entry-point {
+    height: 100vh;
+}
+
+#main-container {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+}
+
+#sidebar {
+    width: 17.5rem;
+    background: linear-gradient(135deg, #76B900 0%, #1a1a1a 100%);
+    border-top-right-radius: 0.75rem;
+    border-bottom-right-radius: 0.75rem;
+    padding: 1.875rem 1.25rem;
+    box-shadow: 0.125rem 0 0.635rem rgba(0, 0, 0, 0.3);
+    height: 100vh;
+    overflow-y: auto;
+    border-right: 0.125rem solid #2d2d2d;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 1000;
+}
+
+#page-content {
+    margin-left: 17.5rem;
+    padding: 2.5rem;
+    border-top-left-radius: 0.75rem;
+    border-bottom-left-radius: 0.75rem;
+    flex-grow: 1;
+    background: linear-gradient(200deg, #000000 -30%, #1a1a1a 100%);
+    min-height: 100vh;
+    width: calc(100vw - 17.5rem);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    box-sizing: border-box;
+    text-align: justify;
+    overflow-y: auto;
+}
+
+.nav-item {
+    margin-bottom: 0.5rem;
+}
+
+.sidebar-link {
+    display: block;
+    padding: 0.75rem 1.25rem;
+    text-decoration: none;
+    color: white;
+    border-radius: 0.5rem;
+    transition: all 0.3s ease;
+    border-left: 0.25rem solid transparent;
+}
+
+.sidebar-link:hover {
+    background-color: #0076b985;
+    color: white;
+    text-decoration: none;
+    border-left-color: #b90076;
+    transform: translateX(0.3125rem);
+}
+
+.nav-link-content {
+    font-weight: 500;
+    font-size: 1rem;
+}
+
+#home-link {
+    background-color: #0076b985;
+    color: white;
+    border-left-color: #b90076;
+}
+
+h1,
+h2,
+h3 {
+    color: white;
+}
+
+.fas {
+    color: #0076b9;
+}
+
+.sidebar_Hr {
+    border: 0.0625rem solid #0076b9;
+}
+
+.data-load-button {
+    background-color: #0076b9;
+    border: none;
+    border-radius: 1.5625rem;
+    padding: 0.625rem 1.25rem;
+    margin-top: 0.625rem;
+    margin-bottom: 0.3125rem;
+    width: 100%;
+}
+
+.train-button {
+    background-color: #0076b9;
+    border: none;
+    border-radius: 1.5625rem;
+    padding: 0.625rem 1.25rem;
+    margin-top: 0.625rem;
+    margin-bottom: 0.3125rem;
+    width: 100%;
+}
+
+.evaluate-button {
+    background-color: #0076b9;
+    border: none;
+    border-radius: 1.5625rem;
+    padding: 0.625rem 1.25rem;
+    margin-top: 0.625rem;
+    margin-bottom: 0.3125rem;
+    width: 100%;
+    display: block;
+}
+
+.metric-card {
+    background: #2d3748;
+    padding: 0.5rem;
+    border-radius: 1rem;
+    text-align: center;
+    flex: 1 1 16.5rem;
+    margin: 0.5rem;
+    max-width: 16rem;
+}
+
+/* Scrollbar styling for sidebar */
+#sidebar::-webkit-scrollbar {
+    width: 0.375rem;
+}
+
+#sidebar::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 0.1875rem;
+}
+
+#sidebar::-webkit-scrollbar-thumb {
+    background: rgba(74, 158, 255, 0.5);
+    border-radius: 0.1875rem;
+}
+
+#sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(74, 158, 255, 0.7);
+}
+
+/* Responsive design */
+@media (max-width: 47.5rem) {
+    #sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+    }
+
+    #page-content {
+        margin-left: 0;
+    }
+
+    #main-container {
+        flex-direction: column;
+    }
+}
