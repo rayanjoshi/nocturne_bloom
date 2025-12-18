@@ -3,7 +3,7 @@ defaults:
 model:
   target_sequence_length: 1  # Predicting the next closing price
   huber_delta: 0.11443956856559279  # Delta for Huber loss, can be adjusted based on the dataset
-  # non-normalized weighted averaging of CNN and ElasticNet regression outputs #
+  # non-normalised weighted averaging of CNN and ElasticNet regression outputs #
   
   price_loss_weight: 0.7699239391953919
   direction_loss_weight: 0.5432210947784749
@@ -30,7 +30,7 @@ model:
 
 cnn:
   input_channels: 119  # Number of features (RSI, MACD, etc.)
-  cnn_channels: [16, 48, 8]  # Reduced capacity to prevent overfitting
+  cnn_channels: [16, 48, 8]  # Reduced capacity to prevent over-fitting
   kernel_size: [5, 7, 2]
   pool_size: [5, 2, 3]  # Pooling after each CNN layer
   pool_padding: [0, 0, 0]
@@ -41,7 +41,7 @@ cnn:
   num_classes: 3
 
 ridge:
-  alpha: 39.87200645314886  # Regularization strength for Ridge regression, can be adjusted based on the dataset
+  alpha: 39.87200645314886  # Regularisation strength for Ridge regression, can be adjusted based on the dataset
   fit_intercept: True
   eps: 5.285391068767814e-08
 
@@ -54,7 +54,7 @@ optimiser:
   name: 'adam'
   base_lr: 0.001158651470636477
   meta_lr: 0.006783558000782332
-  weight_decay: 4.152785493174216e-07  # L2 regularization term 
+  weight_decay: 4.152785493174216e-07  # L2 regularisation term 
   eps: 3.539392686029228e-12
   amsgrad: False  # Whether to use AMSGrad variant of Adam
   scheduler_mode: 'min'

@@ -6,13 +6,12 @@ defaults:
 data_loader:
   START_DATE: "2022-10-31" # Date should be from a quarter before start date, so PE and PB data can be calculated
   END_DATE: "2024-12-31"
-  raw_data_path: data/raw/nvda_raw_evaluate_data.csv
+  raw_data_path: data/raw/${data_loader.TICKER}_raw_evaluate_data.csv
   sql_save_path: WRDS_query.sql
 
 features:
-  preprocessing_data_path: data/preprocessing/nvda_preprocessed_evaluate_data.csv
-
+  preprocessing_data_path: data/preprocessing/${data_loader.TICKER}_preprocessed_evaluate_data.csv
 backtest:
-  predictions_save_path: data/predictions/nvda_predictions.csv
+  predictions_save_path: data/predictions/${data_loader.TICKER}_predictions.csv
   starting_cash: 100000
   commission: 0.001

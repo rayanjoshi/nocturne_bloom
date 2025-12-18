@@ -1,28 +1,32 @@
+defaults:
+  - data_loader
+  - feature_engineering
+
 data_module:
   window_size: 20
   price_target_col: Price_Target
   direction_target_col: Direction_Target
   output_seq_len: 1
 
-  x_save_path: data/processed/nvda_processed_x.pt
-  price_y_save_path: data/processed/nvda_processed_price_y.pt
-  direction_y_save_path: data/processed/nvda_processed_direction_y.pt
+  x_save_path: data/processed/${data_loader.TICKER}_processed_x.pt
+  price_y_save_path: data/processed/${data_loader.TICKER}_processed_price_y.pt
+  direction_y_save_path: data/processed/${data_loader.TICKER}_processed_direction_y.pt
   price_y_scaled_save_path: models/scalers/Price_Target_scaler.pkl
   x_scaled_save_path: models/scalers/feature_scaler.pkl
 
-  eval_x_scaled_save_path: data/processed/eval_nvda_processed_x.pt
-  eval_price_y_scaled_save_path: data/processed/eval_nvda_processed_price_y.pt
-  eval_direction_y_scaled_save_path: data/processed/eval_nvda_processed_direction_y.pt
+  eval_x_scaled_save_path: data/processed/eval_${data_loader.TICKER}_processed_x.pt
+  eval_price_y_scaled_save_path: data/processed/eval_${data_loader.TICKER}_processed_price_y.pt
+  eval_direction_y_scaled_save_path: data/processed/eval_${data_loader.TICKER}_processed_direction_y.pt
 
   batch_size: 16
   num_workers: 7
   train_val_split: 0.8
 
 data_processor:
-  x_load_path: data/processed/nvda_processed_data.npy
-  price_y_load_path: data/processed/nvda_processed_Price_Target.npy
-  direction_y_load_path: data/processed/nvda_processed_Direction_Target.npy
-  x_save_path: data/processed/nvda_processed_x.pt
-  price_y_save_path: data/processed/nvda_processed_price_y.pt
-  direction_y_save_path: data/processed/nvda_processed_direction_y.pt
-  preprocessing_data_path: data/preprocessing/nvda_processed_data.csv
+  x_load_path: data/processed/${data_loader.TICKER}_processed_data.npy
+  price_y_load_path: data/processed/${data_loader.TICKER}_processed_Price_Target.npy
+  direction_y_load_path: data/processed/${data_loader.TICKER}_processed_Direction_Target.npy
+  x_save_path: data/processed/${data_loader.TICKER}_processed_x.pt
+  price_y_save_path: data/processed/${data_loader.TICKER}_processed_price_y.pt
+  direction_y_save_path: data/processed/${data_loader.TICKER}_processed_direction_y.pt
+  preprocessing_data_path: data/preprocessing/${data_loader.TICKER}_processed_data.csv

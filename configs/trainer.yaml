@@ -9,8 +9,8 @@ trainer:
   max_epochs: 120  # More epochs with early stopping
   accelerator: "auto"
   devices: 1
-  log_every_n_steps: 10  # Optimized logging frequency
-  seed: 42  # Optimized seed for reproducibility
+  log_every_n_steps: 10  # Optimised logging frequency
+  seed: 42  # Optimised seed for reproducibility
   early_stopping_patience: 5  # Stop after 5 epochs with no improvement
-  early_stopping_delta: 0.05989307759241627  # Optimized delta for early stopping
+  early_stopping_delta: 0.05989307759241627  # Optimised delta for early stopping
   gradient_clip_val: 1.1663433374104497  # Gradient clipping to prevent exploding gradients
