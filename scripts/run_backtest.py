@@ -6,7 +6,6 @@ create data modules for model input, generate predictions using an ensemble mode
 and run trading simulations using Backtrader.
 """
 from pathlib import Path
-from typing import Optional
 import json
 import pandas as pd
 import hydra
@@ -671,10 +670,11 @@ class StrategySimulation(bt.Strategy):
         """
         if not trade.isclosed:
             return
+        self.recent_trades.append(1 if trade.pnlcomm > 0 else 0)
         self.log(f'OPERATION PROFIT, GROSS {trade.pnl:.2f}, NET {trade.pnlcomm:.2f}')
 
 @hydra.main(version_base=None, config_path="../configs", config_name="backtest")
-def main(cfg: Optional[DictConfig] = None):
+def main(cfg: DictConfig):
     """
     Main function to orchestrate data processing, prediction, and trading simulation.
 
