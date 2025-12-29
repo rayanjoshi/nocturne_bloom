@@ -26,9 +26,8 @@ Dependencies:
 
 import sys
 import os
-from typing import Optional
 from pathlib import Path
-from dotenv import dotenv_values
+from dotenv import load_dotenv
 import wrds
 import pandas as pd
 import hydra
@@ -40,6 +39,7 @@ from scripts.logging_config import (
     log_function_end,
 )
 
+load_dotenv()
 
 def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save_name):
     """
@@ -72,76 +72,17 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
         end_date=end_date,
         save_name=save_name,
     )
+    
+    # Convert relative path to absolute path within the repository
+    script_dir = Path(__file__).parent.resolve()  # /path/to/repo/src
+    repo_root = script_dir.parent  # /path/to/repo/
 
     logger.info("Loading data from WRDS...")
-    try:
-        script_dir = Path(__file__).parent
-        repo_root = script_dir.parent
-        dotenv_path = repo_root / ".env"
-        if dotenv_path.exists():
-            try:
-                values = dotenv_values(dotenv_path)
-                for k in ("WRDS_USERNAME", "WRDS_PASSWORD"):
-                    if values.get(k) and not os.getenv(k):
-                        os.environ[k] = values.get(k)
-            except Exception:
-                # Fallback to load_dotenv if dotenv_values isn't available
-                try:
-                    from dotenv import load_dotenv
-
-                    load_dotenv(dotenv_path=str(dotenv_path))
-                except Exception:
-                    pass
-    except Exception:
-        # Non-fatal; continue and let WRDS client fail later if needed
-        pass
-
-    def _ensure_pgpass(
-        host: str = "wrds-pgdata.wharton.upenn.edu",
-        port: str = "9737",
-        dbname: str = "wrds",
-    ) -> bool:
-        user = os.getenv("WRDS_USERNAME")
-        pw = os.getenv("WRDS_PASSWORD")
-        if not user or not pw:
-            return False
-        pgpass = Path.home() / ".pgpass"
-        entry = f"{host}:{port}:{dbname}:{user}:{pw}\n"
-        try:
-            if pgpass.exists():
-                existing = pgpass.read_text()
-                if entry.strip() in existing:
-                    return True
-            # Append the entry and set strict permissions
-            with open(pgpass, "a", encoding="utf-8") as f:
-                f.write(entry)
-            pgpass.chmod(0o600)
-            return True
-        except Exception:
-            return False
-
-    # Try to ensure ~/.pgpass exists before connecting so WRDS client won't prompt.
-    pgpass_ready = _ensure_pgpass()
-
-    db = wrds.Connection(
-        wrds_username=os.getenv("WRDS_USERNAME"),
-        wrds_password=os.getenv("WRDS_PASSWORD"),
-    )
-    # If we couldn't create ~/.pgpass beforehand, fall back to the WRDS helper
-    # which may prompt interactively. If pgpass_ready is True, skip calling
-    # create_pgpass_file() to avoid unnecessary prompts.
-    if not pgpass_ready:
-        try:
-            db.create_pgpass_file()
-        except Exception:
-            # If create_pgpass_file fails (e.g., non-interactive CI), continue;
-            # the connection may still work if credentials were supplied.
-            logger.debug("db.create_pgpass_file() failed or was skipped")
-    logger.info("Connected to WRDS successfully.")
-    # print(db.list_libraries())  # prints accessible data sets
-    sql_path = Path(__file__).parent / cfg.data_loader.sql_save_path
-    logger.info(f"Reading SQL query from {sql_path}.")
-    with open(sql_path, "r", encoding="utf-8") as file:
+    username = os.getenv("WRDS_USERNAME")
+    password = os.getenv("WRDS_PASSWORD")
+    
+    sql_query_path = Path(repo_root / cfg.data_loader.sql_save_path)
+    with open(sql_query_path, "r") as file:
         wrds_query = file.read()
 
     sql_query = wrds_query.format(
@@ -152,52 +93,16 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
         END_DATE=end_date,
     )
     logger.info("Executing SQL query...")
-
-    # Attempt to execute the query using the WRDS helper. If the underlying
-    # connection is a SQLAlchemy Engine/Connection (common with modern wrds clients)
-    # pandas may attempt to call .cursor() on it which will fail. Provide a
-    # graceful fallback: try db.raw_sql first, then fall back to pd.read_sql_query
-    # using SQLAlchemy engine or a raw DB-API connection via engine.raw_connection().
-    try:
-        df = db.raw_sql(sql_query)
-    except AttributeError as raw_err:
-        logger.warning(
-            "db.raw_sql raised AttributeError; attempting SQLAlchemy fallback: %s",
-            raw_err,
-        )
-        engine = None
-        # prefer explicit engine attribute if available
-        for candidate in ("engine", "connection", "conn"):
-            if hasattr(db, candidate):
-                engine = getattr(db, candidate)
-                logger.info(
-                    "Using db.%s of type %s for fallback", candidate, type(engine)
-                )
-                break
-
-        if engine is None:
-            raise RuntimeError(
-                "Unable to obtain a SQLAlchemy engine/connection from the WRDS client. "
-                "Ensure a DB-API driver (e.g. psycopg2-binary) is installed or inspect the `db` object."
-            ) from raw_err
-
-        try:
-            # Let pandas handle SQLAlchemy Engine/Connection directly if possible
-            df = pd.read_sql_query(sql_query, con=engine)
-        except Exception:
-            # Fall back to obtaining a raw DB-API connection from the engine
-            if hasattr(engine, "raw_connection"):
-                raw_conn = engine.raw_connection()
-                try:
-                    df = pd.read_sql_query(sql_query, con=raw_conn)
-                finally:
-                    try:
-                        raw_conn.close()
-                    except Exception:
-                        pass
-            else:
-                # Re-raise with context if no workable fallback exists
-                raise
+    
+    pgpass_path = Path.home() / ".pgpass"
+    if not pgpass_path.exists():
+        content = f"wrds-pgdata.wharton.upenn.edu:9737:wrds:{username}:{password}\n"
+        pgpass_path.write_text(content)
+        pgpass_path.chmod(0o600)
+    
+    db = wrds.Connection(wrds_username=username)
+    
+    df = db.raw_sql(sql_query)
 
     if df.empty:
         error_msg = f"No data found for {ticker} in the specified date range."
@@ -238,7 +143,7 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
         "PE_Ratio",
     ]
 
-    # Drop permno column as it's not needed for modeling
+    # Drop permno column as it's not needed for modelling
     df = df.drop("permno", axis=1)
 
     # ===== INTELLIGENT IMPUTATION FOR 100% DATA COVERAGE =====
@@ -326,7 +231,7 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
     coverage_check = df.isna().sum()
     total_missing = coverage_check.sum()
     if total_missing == 0:
-        logger.info("PERFECT: 100% data coverage achieved!")
+        logger.info("100% data coverage achieved!")
     else:
         logger.warning(f"This amount {total_missing} of missing values remain.")
         logger.warning(coverage_check[coverage_check > 0])
@@ -334,10 +239,7 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
     # Drop QQQ_Return as it was only needed for imputation
     df = df.drop("QQQ_Return", axis=1)
 
-    # Convert relative path to absolute path within the repository
-    script_dir = Path(__file__).parent  # /path/to/repo/src
-    repo_root = script_dir.parent  # /path/to/repo/
-    output_path = Path(repo_root / save_name.lstrip("./")).resolve()
+    output_path = Path(repo_root / save_name.lstrip("./"))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=True)
@@ -354,7 +256,7 @@ def load_data(cfg: DictConfig, ticker, permno, gvkey, start_date, end_date, save
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="data_loader")
-def main(cfg: Optional[DictConfig] = None):
+def main(cfg: DictConfig):
     """
     Entry point for the NVDA Stock Predictor data loading pipeline.
 

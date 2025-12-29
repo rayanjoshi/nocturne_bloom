@@ -4,5 +4,5 @@ data_loader:
   GVKEY: 117768
   START_DATE: "2004-10-31" # Date should be from a quarter before start date, so PE and PB data can be calculated
   END_DATE: "2022-12-31"
-  sql_save_path: WRDS_query.sql
+  sql_save_path: src/WRDS_query.sql
   raw_data_path: data/raw/${data_loader.TICKER}_raw_data.csv
