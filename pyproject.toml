@@ -19,14 +19,14 @@ dependencies = [
     "numpy==1.26.4",
     "shap",
     "captum",
-    # -------- Data Handling & Visualization -------- #
+    # -------- Data Handling & Visualisation -------- #
     "matplotlib",
     "seaborn",
     "plotly",
     # -------- Logging -------- #
     "wandb",
     # -------- Financial Data -------- #
-    "wrds",
+    "wrds==3.4.0",
     "yfinance",
     "pandas_datareader",
     # -------- Backtesting & Technical Analysis -------- #
@@ -38,7 +38,7 @@ dependencies = [
     "dash",
     "dash-bootstrap-components",
     "dash[diskcache]",
-    # -------- Hyperparameter Optimization -------- #
+    # -------- Hyperparameter Optimisation -------- #
     "ray[tune]==2.48.0",
     "optuna",
     # -------- Utilities -------- #
