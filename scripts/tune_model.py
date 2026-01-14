@@ -1,14 +1,14 @@
 """
-Hyperparameter optimization for stock price prediction using Ray Tune and Optuna.
+Hyperparameter optimisation for stock price prediction using Ray Tune and Optuna.
 
 This module defines functions and classes to perform hyperparameter tuning for a stock
 prediction model using an ensemble of CNN, LSTM, and Ridge regression components. It
 integrates Ray Tune with Optuna for search space exploration, supports multi-objective
-optimization, and handles training with PyTorch Lightning.
+optimisation, and handles training with PyTorch Lightning.
 
 The main components include:
 - Definition of search spaces for hyperparameter tuning.
-- Configuration updates for the model, optimizer, and data module.
+- Configuration updates for the model, optimiser, and data module.
 - Training and evaluation of the model with custom metrics.
 - Integration with logging and checkpointing for reproducibility.
 """
@@ -16,7 +16,7 @@ import tempfile
 import os
 import subprocess
 from dotenv import load_dotenv
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from pathlib import Path
 import hydra
 import torch
@@ -55,19 +55,19 @@ class MultiObjectiveMetric:
     Custom metric combining MAE and direction accuracy with configurable weights.
 
     This class computes a weighted combination of Mean Absolute Error (MAE) and
-    directional accuracy for multi-objective optimization in stock price prediction.
+    directional accuracy for multi-objective optimisation in stock price prediction.
 
     Attributes:
         mae_weight (float): Weight for the MAE component in the combined score.
         acc_weight (float): Weight for the directional accuracy component.
-        mae_scale (float): Scaling factor for normalizing MAE.
+        mae_scale (float): Scaling factor for normalising MAE.
 
     Args:
         mae_weight (float, optional): Weight for MAE. Defaults to 0.5.
         acc_weight (float, optional): Weight for directional accuracy. Defaults to 0.5.
-        mae_scale (float, optional): Scale for MAE normalization. Defaults to 1.0.
+        mae_scale (float, optional): Scale for MAE normalisation. Defaults to 4.0.
     """
-    def __init__(self, mae_weight=0.5, acc_weight=0.5, mae_scale=1.0):
+    def __init__(self, mae_weight=0.5, acc_weight=0.5, mae_scale=4.0):
         self.mae_weight = mae_weight
         self.acc_weight = acc_weight
         self.mae_scale = mae_scale
@@ -95,7 +95,7 @@ def optuna_search_space(trial):
     Define the hyperparameter search space for Optuna.
 
     This function creates an exhaustive search space for tuning hyperparameters
-    of a stock prediction model, optimizing for low MAE and high directional accuracy.
+    of a stock prediction model, optimising for low MAE and high directional accuracy.
 
     Args:
         trial (optuna.trial.Trial): Optuna trial object for suggesting parameters.
@@ -227,7 +227,7 @@ def optuna_search_space(trial):
             "focal_beta", 0.9, 0.9999, step=0.001
         ),
 
-        # Optimizer parameters - comprehensive tuning
+        # Optimiser parameters - comprehensive tuning
         "weight_decay": trial.suggest_float(
             "weight_decay", 1e-8, 1e-1, log=True
         ),
@@ -281,7 +281,7 @@ def optuna_search_space(trial):
             "output_size", [1]
         ),  # Keep as 1 for regression
 
-        # Meta-learning and optimizer params
+        # Meta-learning and optimiser params
         "use_meta_learning": trial.suggest_categorical(
             "use_meta_learning", [True, False]
         ),
@@ -367,7 +367,7 @@ def get_ray_tune_search_space():
         "focal_alpha": tune.uniform( 0.1, 0.75),
         "focal_beta": tune.uniform(0.9, 0.9999),
 
-        # Optimizer parameters - comprehensive tuning
+        # Optimiser parameters - comprehensive tuning
         "weight_decay": tune.loguniform(1e-8, 1e-1),
         "optimizer_eps": tune.loguniform(1e-12, 1e-4),
 
@@ -390,7 +390,7 @@ def get_ray_tune_search_space():
         # CNN architecture choices
         "num_classes": tune.choice([3]),  # Keep as 3 for your setup
         "output_size": tune.choice([1]),  # Keep as 1 for regression
-        # Meta-learning and optimizer params
+        # Meta-learning and optimiser params
         "meta_price_loss_weight": tune.uniform(0.5, 2.0),
         "meta_direction_loss_weight": tune.uniform(0.5, 2.0),
         "base_lr": tune.loguniform(1e-7, 1e-2),
@@ -404,7 +404,7 @@ def update_config_from_trial_params(
     Update the base configuration with trial parameters.
 
         This function modifies the base configuration with hyperparameters from a trial,
-        updating parameters for CNN, Ridge, LSTM, ensemble weights, losses, optimizer,
+        updating parameters for CNN, Ridge, LSTM, ensemble weights, losses, optimiser,
         trainer, and data module.
 
         Args:
@@ -537,17 +537,17 @@ def update_config_from_trial_params(
 
     return OmegaConf.create(cfg_dict)
 
-def train_model(config, base_cfg=None, optimization_target="multi_objective"):
+def train_model(config, base_cfg=None, optimisation_target="multi_objective"):
     """
     Train the stock prediction model with given hyperparameters.
 
     This function configures and trains the ensemble model using PyTorch Lightning,
-    reporting validation metrics to Ray Tune for hyperparameter optimization.
+    reporting validation metrics to Ray Tune for hyperparameter optimisation.
 
     Args:
         config (dict): Hyperparameters for the trial.
         base_cfg (DictConfig, optional): Base configuration to update. Defaults to None.
-        optimization_target (str, optional): Metric to optimize. Defaults to "multi_objective".
+        optimisation_target (str, optional): Metric to optimize. Defaults to "multi_objective".
 
     Raises:
         RuntimeError: If model training fails due to computational issues.
@@ -555,7 +555,7 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
         OSError: If file operations fail.
         KeyboardInterrupt: If training is interrupted by the user.
     """
-    logger = log_function_start("train_model", optimization_target=optimization_target)
+    logger = log_function_start("train_model", optimisation_target=optimisation_target)
 
     # Update config with trial parameters
     cfg = update_config_from_trial_params(base_cfg, config)
@@ -623,7 +623,7 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
                 metric_calculator = MultiObjectiveMetric(
                     mae_weight=0.9,
                     acc_weight=0.1,
-                    mae_scale=1.0,
+                    mae_scale=4.0,
                 )
                 multi_objective_score = metric_calculator(val_mae, dir_acc_val)
 
@@ -669,16 +669,16 @@ def train_model(config, base_cfg=None, optimization_target="multi_objective"):
             raise
 
 @hydra.main(version_base=None, config_path="../configs", config_name="trainer")
-def main(cfg: Optional[DictConfig] = None):
+def main(cfg: DictConfig):
     """
-    Perform hyperparameter optimization for stock prediction model.
+    Perform hyperparameter optimisation for stock prediction model.
 
     This function sets up and runs a hyperparameter search using Ray Tune with Optuna
-    or random search, optimizing for a multi-objective metric combining MAE and
+    or random search, optimising for a multi-objective metric combining MAE and
     directional accuracy. Results are logged and the best configuration is saved.
 
     Args:
-        cfg (DictConfig, optional): Hydra configuration object. Defaults to None.
+        cfg DictConfig: Hydra configuration object.
     """
     setup_logging(log_level="INFO", console_output=True, file_output=True)
     logger = get_logger("main")
@@ -687,15 +687,15 @@ def main(cfg: Optional[DictConfig] = None):
     if not ray.is_initialized():
         ray.init(ignore_reinit_error=True)
 
-    logger.info("=== NVDA Stock Predictor Hyperparameter Optimization with Optuna ===")
+    logger.info("=== NVDA Stock Predictor Hyperparameter Optimisation with Optuna ===")
 
-    # Configuration for optimization
+    # Configuration for optimisation
     metric = "multi_objective_score"
     mode = "max"
     num_samples = 100
     max_concurrent = 5
 
-    logger.info("Optimizing for combined MAE and Direction Accuracy")
+    logger.info("Optimising for combined MAE and Direction Accuracy")
     logger.info(f"Number of trials: {num_samples}")
     logger.info(f"Max concurrent trials: {max_concurrent}")
 
@@ -727,7 +727,7 @@ def main(cfg: Optional[DictConfig] = None):
             logger.info("✅ Using OptunaSearch (Optuna TPE sampler)")
 
         except (ValueError, RuntimeError, TypeError) as e:
-            # Handle known initialization errors and fall back to random search
+            # Handle known initialisation errors and fall back to random search
             logger.warning(f"❌ OptunaSearch failed to initialize: {e}")
             logger.info("🔧 Falling back to basic RandomSearch")
             search_alg = None
@@ -808,7 +808,7 @@ def main(cfg: Optional[DictConfig] = None):
 
     logger.info("\nStarting Optuna hyperparameter search:")
     logger.info(f"   - Target metric: {metric}")
-    logger.info(f"   - Optimization mode: {mode}")
+    logger.info(f"   - Optimisation mode: {mode}")
     logger.info(f"   - Number of trials: {num_samples}")
     logger.info(f"   - Max concurrent: {max_concurrent}")
     logger.info(f"   - Results will be saved to: {outputs_dir}")
@@ -817,7 +817,7 @@ def main(cfg: Optional[DictConfig] = None):
     trainable = tune.with_parameters(
         train_model,
         base_cfg=cfg,
-        optimization_target=metric
+        optimisation_target=metric
     )
 
     # Run hyperparameter search - always use param_space with search_space
@@ -839,7 +839,7 @@ def main(cfg: Optional[DictConfig] = None):
     best_result = results.get_best_result(metric=metric, mode=mode)
 
     logger.info("\n" + "="*60)
-    logger.info("🏆 OPTUNA OPTIMIZATION COMPLETE!")
+    logger.info("🏆 OPTUNA OPTIMISATION COMPLETE!")
     logger.info("="*60)
     logger.info(f"Best {metric}: {best_result.metrics[metric]:.6f}")
     logger.info(f"Best validation loss: {best_result.metrics['val_loss']:.6f}")
